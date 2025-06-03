@@ -2,6 +2,7 @@ const { VertexAI } = require('@google-cloud/vertexai');
 const { GoogleAuth } = require('google-auth-library');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { logger } = require('../utils/logger');
 const config = require('../utils/config');
 
@@ -12,8 +13,8 @@ class GeminiService {
                 throw new Error('Missing GOOGLE_APPLICATION_CREDENTIALS_JSON environment variable');
             }
 
-            // Parse credentials to verify JSON format
-            this.credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+            // Enhanced credential validation
+            this.validateAndParseCredentials();
             this.projectId = process.env.GOOGLE_CLOUD_PROJECT_ID || this.credentials.project_id;
             this.location = process.env.GOOGLE_CLOUD_REGION || 'us-central1';
 
@@ -43,6 +44,54 @@ class GeminiService {
         }
     }
 
+    validateAndParseCredentials() {
+        try {
+            // Get the raw credential string
+            const credString = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+            logger.info(`Credential string length: ${credString.length}`);
+            
+            // Try to parse the JSON
+            this.credentials = JSON.parse(credString);
+            
+            // Validate required fields
+            const requiredFields = ['type', 'project_id', 'private_key_id', 'private_key', 'client_email', 'client_id', 'auth_uri', 'token_uri'];
+            const missingFields = requiredFields.filter(field => !this.credentials[field]);
+            
+            if (missingFields.length > 0) {
+                throw new Error(`Missing required credential fields: ${missingFields.join(', ')}`);
+            }
+            
+            // Validate service account type
+            if (this.credentials.type !== 'service_account') {
+                throw new Error(`Invalid credential type: ${this.credentials.type}. Expected: service_account`);
+            }
+            
+            // Validate private key format
+            if (!this.credentials.private_key.includes('-----BEGIN PRIVATE KEY-----')) {
+                throw new Error('Invalid private key format. Missing PEM headers.');
+            }
+            
+            // Check for common newline issues in private key
+            if (!this.credentials.private_key.includes('\n')) {
+                logger.warn('Private key appears to be missing newlines. Attempting to fix...');
+                this.credentials.private_key = this.credentials.private_key
+                    .replace(/-----BEGIN PRIVATE KEY-----/g, '-----BEGIN PRIVATE KEY-----\n')
+                    .replace(/-----END PRIVATE KEY-----/g, '\n-----END PRIVATE KEY-----')
+                    .replace(/(.{64})/g, '$1\n')
+                    .replace(/\n\n/g, '\n');
+            }
+            
+            logger.info(`Successfully validated credentials for: ${this.credentials.client_email}`);
+            logger.info(`Project ID: ${this.credentials.project_id}`);
+            
+        } catch (parseError) {
+            logger.error('Failed to parse credentials JSON:', parseError.message);
+            logger.error('First 100 characters of credential string:', 
+                process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON?.substring(0, 100));
+            throw new Error(`Invalid credential JSON format: ${parseError.message}`);
+        }
+    }
+
     setupCredentialsFile() {
         try {
             // Create /tmp directory if it doesn't exist
@@ -51,14 +100,23 @@ class GeminiService {
                 fs.mkdirSync(tmpDir, { recursive: true });
             }
 
-            // Write credentials to temporary file
-            this.credentialsPath = path.join(tmpDir, 'gcp-credentials.json');
-            fs.writeFileSync(this.credentialsPath, JSON.stringify(this.credentials, null, 2));
+            // Write credentials to temporary file with proper formatting
+            this.credentialsPath = path.join(tmpDir, `gcp-credentials-${Date.now()}.json`);
+            const credentialsContent = JSON.stringify(this.credentials, null, 2);
+            fs.writeFileSync(this.credentialsPath, credentialsContent, { mode: 0o600 });
+            
+            // Verify the file was written correctly
+            const writtenContent = fs.readFileSync(this.credentialsPath, 'utf8');
+            const parsedWritten = JSON.parse(writtenContent);
+            
+            if (parsedWritten.client_email !== this.credentials.client_email) {
+                throw new Error('Credential file verification failed');
+            }
             
             // Set environment variable for Google libraries
             process.env.GOOGLE_APPLICATION_CREDENTIALS = this.credentialsPath;
             
-            logger.info(`Credentials file created at: ${this.credentialsPath}`);
+            logger.info(`Credentials file created and verified at: ${this.credentialsPath}`);
         } catch (error) {
             logger.error(`Error setting up credentials file: ${error.message}`);
             throw error;
@@ -68,6 +126,8 @@ class GeminiService {
     async testAuth() {
         try {
             logger.info('Testing Google Cloud authentication...');
+            logger.info(`Using project: ${this.projectId}`);
+            logger.info(`Using service account: ${this.credentials.client_email}`);
             
             // Get an authenticated client
             const client = await this.auth.getClient();
@@ -77,13 +137,73 @@ class GeminiService {
             
             if (accessToken && accessToken.token) {
                 logger.info('Authentication test successful');
+                logger.info(`Token type: ${typeof accessToken.token}`);
+                logger.info(`Token length: ${accessToken.token.length}`);
                 return true;
             } else {
                 throw new Error('No access token received');
             }
         } catch (error) {
-            logger.error('Authentication test failed:', error.message);
-            throw new Error('Failed to authenticate with Google Cloud');
+            logger.error('Authentication test failed:', {
+                message: error.message,
+                code: error.code,
+                stack: error.stack?.split('\n')[0] // Just first line of stack
+            });
+            
+            // Provide specific guidance based on error type
+            if (error.message.includes('Invalid JWT Signature')) {
+                throw new Error('JWT signature validation failed. This usually indicates corrupted service account credentials. Please regenerate your service account key.');
+            } else if (error.message.includes('invalid_grant')) {
+                throw new Error('Invalid grant error. Please check your service account permissions and ensure the key is not expired.');
+            } else if (error.message.includes('Forbidden')) {
+                throw new Error('Access denied. Ensure your service account has the required IAM roles (Vertex AI User, Storage Admin).');
+            }
+            
+            throw new Error(`Authentication failed: ${error.message}`);
+        }
+    }
+
+    // Add method to validate service account permissions
+    async validateServiceAccountPermissions() {
+        try {
+            const { google } = require('googleapis');
+            const auth = await this.auth.getClient();
+            
+            // Test Cloud Resource Manager API access
+            const cloudresourcemanager = google.cloudresourcemanager({ 
+                version: 'v1', 
+                auth: auth 
+            });
+            
+            // Try to get project information
+            const project = await cloudresourcemanager.projects.get({
+                projectId: this.projectId
+            });
+            
+            logger.info(`Project validation successful: ${project.data.name}`);
+            
+            // Test Vertex AI API access by trying to list models
+            const aiplatform = google.aiplatform({ 
+                version: 'v1', 
+                auth: auth 
+            });
+            
+            // This will test if we have proper Vertex AI permissions
+            const modelsResponse = await aiplatform.projects.locations.models.list({
+                parent: `projects/${this.projectId}/locations/${this.location}`
+            });
+            
+            logger.info('Vertex AI permissions validated successfully');
+            return true;
+            
+        } catch (error) {
+            logger.error('Service account permission validation failed:', error.message);
+            
+            if (error.code === 403) {
+                throw new Error('Insufficient permissions. Please ensure your service account has these roles: Vertex AI User, Storage Object Admin, and Project Viewer.');
+            }
+            
+            throw error;
         }
     }
 
@@ -94,18 +214,23 @@ class GeminiService {
             // First validate the prompt
             await this.validatePrompt(prompt);
 
-            // Test authentication before making the request
+            // Test authentication and permissions before making the request
             try {
                 await this.testAuth();
-                logger.info('Authentication test passed, proceeding with image generation');
+                logger.info('Authentication test passed');
+                
+                // Also validate service account permissions
+                await this.validateServiceAccountPermissions();
+                logger.info('Permission validation passed, proceeding with image generation');
+                
             } catch (authError) {
-                logger.error('Authentication test failed:', authError.message);
-                throw new Error('Authentication failed. Please verify service account permissions.');
+                logger.error('Authentication/Permission test failed:', authError.message);
+                throw authError; // Re-throw the specific error
             }
 
             logger.info('Sending request to generate image...');
 
-            // Try using the REST API approach instead of the client library
+            // Try using the REST API approach first
             const accessToken = await this.getAccessToken();
             const response = await this.generateImageWithRestAPI(prompt, accessToken);
             
@@ -123,24 +248,19 @@ class GeminiService {
             // Enhanced error handling with specific messages
             if (error.message && error.message.includes('quota')) {
                 throw new Error('Rate limit exceeded. Please try again later.');
-            } else if (error.message && (error.message.includes('scope') || error.message.includes('authenticate') || error.message.includes('Unable to authenticate'))) {
-                logger.error('Authentication error details:', {
-                    message: error.message,
-                    stack: error.stack,
-                    name: error.name
-                });
-                throw new Error('Authentication failed. Please verify service account permissions.');
+            } else if (error.message && (error.message.includes('JWT') || error.message.includes('invalid_grant'))) {
+                throw new Error('Authentication failed due to invalid credentials. Please regenerate your service account key.');
             } else if (error.message && error.message.includes('ENOENT')) {
                 logger.error('File system error:', error);
                 throw new Error('Service configuration error. Please contact support.');
-            } else if (error.message && (error.message.includes('permission') || error.message.includes('access'))) {
-                throw new Error('Insufficient permissions. Please verify service account has the required roles.');
+            } else if (error.message && (error.message.includes('permission') || error.message.includes('access') || error.code === 403)) {
+                throw new Error('Insufficient permissions. Please verify service account has these roles: Vertex AI User, Storage Object Admin, Project Viewer.');
             } else if (error.code === 'ENAMETOOLONG') {
                 logger.error('Path too long error - likely credential configuration issue:', error);
                 throw new Error('Configuration error. Please verify credential setup.');
             }
             
-            throw new Error(`Failed to generate image: ${error.message}`);
+            throw error; // Re-throw the original error with its message
         }
     }
 
@@ -252,105 +372,3 @@ class GeminiService {
                             logger.info(`Successfully generated image for user ${userId}`);
                             return {
                                 base64: part.inlineData.data,
-                                mimeType: part.inlineData.mimeType || 'image/png'
-                            };
-                        }
-                    }
-                }
-                
-                // If no image data found, check for text response that might contain image info
-                if (candidate.content && candidate.content.parts && candidate.content.parts[0] && candidate.content.parts[0].text) {
-                    const textResponse = candidate.content.parts[0].text;
-                    try {
-                        const parsedResponse = JSON.parse(textResponse);
-                        if (parsedResponse.image) {
-                            logger.info(`Successfully generated image for user ${userId}`);
-                            return parsedResponse.image;
-                        }
-                    } catch (parseError) {
-                        logger.debug('Response is not JSON, treating as plain text');
-                    }
-                }
-            }
-
-            logger.error('No image data found in response:', JSON.stringify(response.response, null, 2));
-            throw new Error('No image was generated in the response');
-
-        } catch (error) {
-            logger.error('Client library generation failed:', error.message);
-            throw error;
-        }
-    }
-
-    // Alternative method using Imagen API directly
-    async generateImageWithImagen(prompt, userId) {
-        try {
-            logger.info(`Generating image with Imagen for user ${userId} with prompt: ${prompt}`);
-            
-            // Validate the prompt
-            await this.validatePrompt(prompt);
-
-            // Get the Imagen model
-            const model = this.vertexai.getGenerativeModel({
-                model: 'imagegeneration@006'
-            });
-
-            const request = {
-                contents: [{
-                    role: 'user',
-                    parts: [{
-                        text: prompt
-                    }]
-                }]
-            };
-
-            const response = await model.generateContent(request);
-            
-            if (response.response && response.response.candidates && response.response.candidates[0]) {
-                const candidate = response.response.candidates[0];
-                
-                if (candidate.content && candidate.content.parts) {
-                    for (const part of candidate.content.parts) {
-                        if (part.inlineData && part.inlineData.data) {
-                            logger.info(`Successfully generated image with Imagen for user ${userId}`);
-                            return {
-                                base64: part.inlineData.data,
-                                mimeType: part.inlineData.mimeType || 'image/png'
-                            };
-                        }
-                    }
-                }
-            }
-
-            throw new Error('No image data found in Imagen response');
-
-        } catch (error) {
-            logger.error(`Error with Imagen generation: ${error.message}`);
-            // Fall back to main generation method
-            return this.generateImage(prompt, userId);
-        }
-    }
-
-    async validatePrompt(prompt) {
-        if (!prompt || typeof prompt !== 'string') {
-            throw new Error('Invalid prompt: Must be a non-empty string');
-        }
-        if (prompt.length > 1000) {
-            throw new Error('Prompt too long: Must be under 1000 characters');
-        }
-        
-        // Add content safety validation
-        const unsafeContent = ['explicit', 'violence', 'hate', 'harassment', 'sexual', 'nude', 'nsfw'];
-        const lowerPrompt = prompt.toLowerCase();
-        
-        for (const content of unsafeContent) {
-            if (lowerPrompt.includes(content)) {
-                throw new Error(`Invalid prompt: Contains prohibited content`);
-            }
-        }
-        
-        return true;
-    }
-}
-
-module.exports = new GeminiService();
