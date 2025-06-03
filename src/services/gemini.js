@@ -94,7 +94,122 @@ class GeminiService {
             // First validate the prompt
             await this.validatePrompt(prompt);
 
+            // Test authentication before making the request
+            try {
+                await this.testAuth();
+                logger.info('Authentication test passed, proceeding with image generation');
+            } catch (authError) {
+                logger.error('Authentication test failed:', authError.message);
+                throw new Error('Authentication failed. Please verify service account permissions.');
+            }
+
             logger.info('Sending request to generate image...');
+
+            // Try using the REST API approach instead of the client library
+            const accessToken = await this.getAccessToken();
+            const response = await this.generateImageWithRestAPI(prompt, accessToken);
+            
+            if (response && response.base64) {
+                logger.info(`Successfully generated image for user ${userId}`);
+                return response;
+            }
+
+            // Fallback to client library approach
+            return await this.generateImageWithClient(prompt, userId);
+
+        } catch (error) {
+            logger.error(`Error generating image: ${error.message}`);
+            
+            // Enhanced error handling with specific messages
+            if (error.message && error.message.includes('quota')) {
+                throw new Error('Rate limit exceeded. Please try again later.');
+            } else if (error.message && (error.message.includes('scope') || error.message.includes('authenticate') || error.message.includes('Unable to authenticate'))) {
+                logger.error('Authentication error details:', {
+                    message: error.message,
+                    stack: error.stack,
+                    name: error.name
+                });
+                throw new Error('Authentication failed. Please verify service account permissions.');
+            } else if (error.message && error.message.includes('ENOENT')) {
+                logger.error('File system error:', error);
+                throw new Error('Service configuration error. Please contact support.');
+            } else if (error.message && (error.message.includes('permission') || error.message.includes('access'))) {
+                throw new Error('Insufficient permissions. Please verify service account has the required roles.');
+            } else if (error.code === 'ENAMETOOLONG') {
+                logger.error('Path too long error - likely credential configuration issue:', error);
+                throw new Error('Configuration error. Please verify credential setup.');
+            }
+            
+            throw new Error(`Failed to generate image: ${error.message}`);
+        }
+    }
+
+    async getAccessToken() {
+        try {
+            const client = await this.auth.getClient();
+            const accessTokenResponse = await client.getAccessToken();
+            return accessTokenResponse.token;
+        } catch (error) {
+            logger.error('Failed to get access token:', error.message);
+            throw error;
+        }
+    }
+
+    async generateImageWithRestAPI(prompt, accessToken) {
+        try {
+            const fetch = require('node-fetch');
+            
+            const url = `https://${this.location}-aiplatform.googleapis.com/v1/projects/${this.projectId}/locations/${this.location}/publishers/google/models/imagegeneration@006:predict`;
+            
+            const requestBody = {
+                instances: [
+                    {
+                        prompt: prompt
+                    }
+                ],
+                parameters: {
+                    sampleCount: 1
+                }
+            };
+
+            logger.info('Making REST API request to:', url);
+
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestBody)
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                logger.error('REST API error:', errorText);
+                throw new Error(`REST API error: ${response.status} ${errorText}`);
+            }
+
+            const result = await response.json();
+            logger.info('REST API response received');
+
+            if (result.predictions && result.predictions[0] && result.predictions[0].bytesBase64Encoded) {
+                return {
+                    base64: result.predictions[0].bytesBase64Encoded,
+                    mimeType: 'image/png'
+                };
+            }
+
+            throw new Error('No image data in REST API response');
+
+        } catch (error) {
+            logger.error('REST API generation failed:', error.message);
+            throw error;
+        }
+    }
+
+    async generateImageWithClient(prompt, userId) {
+        try {
+            logger.info('Trying client library approach...');
 
             // Use the correct image generation model
             const model = this.vertexai.preview.getGenerativeModel({
@@ -162,29 +277,8 @@ class GeminiService {
             throw new Error('No image was generated in the response');
 
         } catch (error) {
-            logger.error(`Error generating image: ${error.message}`);
-            
-            // Enhanced error handling with specific messages
-            if (error.message && error.message.includes('quota')) {
-                throw new Error('Rate limit exceeded. Please try again later.');
-            } else if (error.message && (error.message.includes('scope') || error.message.includes('authenticate') || error.message.includes('Unable to authenticate'))) {
-                logger.error('Authentication error details:', {
-                    message: error.message,
-                    stack: error.stack,
-                    name: error.name
-                });
-                throw new Error('Authentication failed. Please verify service account permissions.');
-            } else if (error.message && error.message.includes('ENOENT')) {
-                logger.error('File system error:', error);
-                throw new Error('Service configuration error. Please contact support.');
-            } else if (error.message && (error.message.includes('permission') || error.message.includes('access'))) {
-                throw new Error('Insufficient permissions. Please verify service account has the required roles.');
-            } else if (error.code === 'ENAMETOOLONG') {
-                logger.error('Path too long error - likely credential configuration issue:', error);
-                throw new Error('Configuration error. Please verify credential setup.');
-            }
-            
-            throw new Error(`Failed to generate image: ${error.message}`);
+            logger.error('Client library generation failed:', error.message);
+            throw error;
         }
     }
 
