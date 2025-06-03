@@ -1,5 +1,7 @@
 const { VertexAI } = require('@google-cloud/vertexai');
 const { GoogleAuth } = require('google-auth-library');
+const fs = require('fs');
+const path = require('path');
 const { logger } = require('../utils/logger');
 const config = require('../utils/config');
 
@@ -12,12 +14,26 @@ class GeminiService {
 
             // Parse credentials to verify JSON format
             this.credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+            this.projectId = process.env.GOOGLE_CLOUD_PROJECT_ID || this.credentials.project_id;
+            this.location = process.env.GOOGLE_CLOUD_REGION || 'us-central1';
 
-            // Initialize Vertex AI directly with credentials object
+            // Create temporary credentials file for Google libraries
+            this.setupCredentialsFile();
+
+            // Initialize Google Auth first
+            this.auth = new GoogleAuth({
+                keyFile: this.credentialsPath,
+                scopes: ['https://www.googleapis.com/auth/cloud-platform']
+            });
+
+            // Initialize Vertex AI with the credentials file path
             this.vertexai = new VertexAI({
-                project: process.env.GOOGLE_CLOUD_PROJECT_ID || this.credentials.project_id,
-                location: process.env.GOOGLE_CLOUD_REGION || 'us-central1',
-                credentials: this.credentials
+                project: this.projectId,
+                location: this.location,
+                googleAuthOptions: {
+                    keyFile: this.credentialsPath,
+                    scopes: ['https://www.googleapis.com/auth/cloud-platform']
+                }
             });
 
             logger.info('Successfully initialized Vertex AI client');
@@ -27,18 +43,34 @@ class GeminiService {
         }
     }
 
+    setupCredentialsFile() {
+        try {
+            // Create /tmp directory if it doesn't exist
+            const tmpDir = '/tmp';
+            if (!fs.existsSync(tmpDir)) {
+                fs.mkdirSync(tmpDir, { recursive: true });
+            }
+
+            // Write credentials to temporary file
+            this.credentialsPath = path.join(tmpDir, 'gcp-credentials.json');
+            fs.writeFileSync(this.credentialsPath, JSON.stringify(this.credentials, null, 2));
+            
+            // Set environment variable for Google libraries
+            process.env.GOOGLE_APPLICATION_CREDENTIALS = this.credentialsPath;
+            
+            logger.info(`Credentials file created at: ${this.credentialsPath}`);
+        } catch (error) {
+            logger.error(`Error setting up credentials file: ${error.message}`);
+            throw error;
+        }
+    }
+
     async testAuth() {
         try {
             logger.info('Testing Google Cloud authentication...');
             
-            // Create a GoogleAuth instance to test authentication
-            const auth = new GoogleAuth({
-                credentials: this.credentials,
-                scopes: ['https://www.googleapis.com/auth/cloud-platform']
-            });
-
             // Get an authenticated client
-            const client = await auth.getClient();
+            const client = await this.auth.getClient();
             
             // Test by getting an access token
             const accessToken = await client.getAccessToken();
@@ -62,79 +94,240 @@ class GeminiService {
             // First validate the prompt
             await this.validatePrompt(prompt);
 
+            // Test authentication before making the request
+            try {
+                await this.testAuth();
+                logger.info('Authentication test passed, proceeding with image generation');
+            } catch (authError) {
+                logger.error('Authentication test failed:', authError.message);
+                throw new Error('Authentication failed. Please verify service account permissions.');
+            }
+
             logger.info('Sending request to generate image...');
 
-            // Get the model - using the correct model name
-            const model = this.vertexai.preview.getGenerativeModel({
-                model: 'imagegeneration@006'  // Updated to latest version
+            // Try using the REST API approach instead of the client library
+            const accessToken = await this.getAccessToken();
+            const response = await this.generateImageWithRestAPI(prompt, accessToken);
+            
+            if (response && response.base64) {
+                logger.info(`Successfully generated image for user ${userId}`);
+                return response;
+            }
+
+            // Fallback to client library approach
+            return await this.generateImageWithClient(prompt, userId);
+
+        } catch (error) {
+            logger.error(`Error generating image: ${error.message}`);
+            
+            // Enhanced error handling with specific messages
+            if (error.message && error.message.includes('quota')) {
+                throw new Error('Rate limit exceeded. Please try again later.');
+            } else if (error.message && (error.message.includes('scope') || error.message.includes('authenticate') || error.message.includes('Unable to authenticate'))) {
+                logger.error('Authentication error details:', {
+                    message: error.message,
+                    stack: error.stack,
+                    name: error.name
+                });
+                throw new Error('Authentication failed. Please verify service account permissions.');
+            } else if (error.message && error.message.includes('ENOENT')) {
+                logger.error('File system error:', error);
+                throw new Error('Service configuration error. Please contact support.');
+            } else if (error.message && (error.message.includes('permission') || error.message.includes('access'))) {
+                throw new Error('Insufficient permissions. Please verify service account has the required roles.');
+            } else if (error.code === 'ENAMETOOLONG') {
+                logger.error('Path too long error - likely credential configuration issue:', error);
+                throw new Error('Configuration error. Please verify credential setup.');
+            }
+            
+            throw new Error(`Failed to generate image: ${error.message}`);
+        }
+    }
+
+    async getAccessToken() {
+        try {
+            const client = await this.auth.getClient();
+            const accessTokenResponse = await client.getAccessToken();
+            return accessTokenResponse.token;
+        } catch (error) {
+            logger.error('Failed to get access token:', error.message);
+            throw error;
+        }
+    }
+
+    async generateImageWithRestAPI(prompt, accessToken) {
+        try {
+            const fetch = require('node-fetch');
+            
+            const url = `https://${this.location}-aiplatform.googleapis.com/v1/projects/${this.projectId}/locations/${this.location}/publishers/google/models/imagegeneration@006:predict`;
+            
+            const requestBody = {
+                instances: [
+                    {
+                        prompt: prompt
+                    }
+                ],
+                parameters: {
+                    sampleCount: 1
+                }
+            };
+
+            logger.info('Making REST API request to:', url);
+
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestBody)
             });
 
-            // Format the request according to Vertex AI image generation requirements
+            if (!response.ok) {
+                const errorText = await response.text();
+                logger.error('REST API error:', errorText);
+                throw new Error(`REST API error: ${response.status} ${errorText}`);
+            }
+
+            const result = await response.json();
+            logger.info('REST API response received');
+
+            if (result.predictions && result.predictions[0] && result.predictions[0].bytesBase64Encoded) {
+                return {
+                    base64: result.predictions[0].bytesBase64Encoded,
+                    mimeType: 'image/png'
+                };
+            }
+
+            throw new Error('No image data in REST API response');
+
+        } catch (error) {
+            logger.error('REST API generation failed:', error.message);
+            throw error;
+        }
+    }
+
+    async generateImageWithClient(prompt, userId) {
+        try {
+            logger.info('Trying client library approach...');
+
+            // Use the correct image generation model
+            const model = this.vertexai.preview.getGenerativeModel({
+                model: 'imagen-3.0-generate-001'
+            });
+
+            // Create the request for image generation
+            const request = {
+                contents: [{
+                    role: 'user',
+                    parts: [{
+                        text: `Generate an image: ${prompt}`
+                    }]
+                }],
+                generationConfig: {
+                    candidateCount: 1,
+                    maxOutputTokens: 2048,
+                    temperature: 0.4,
+                }
+            };
+
+            // Log request for debugging (excluding sensitive data)
+            logger.debug('Sending request with structure:', {
+                prompt: prompt.substring(0, 100) + (prompt.length > 100 ? '...' : ''),
+                model: 'imagen-3.0-generate-001'
+            });
+
+            // Generate the image
+            const response = await model.generateContent(request);
+            logger.info('Received response from image generation API');
+
+            // Check if response contains image data
+            if (response.response && response.response.candidates && response.response.candidates[0]) {
+                const candidate = response.response.candidates[0];
+                
+                // Check for image parts in the response
+                if (candidate.content && candidate.content.parts) {
+                    for (const part of candidate.content.parts) {
+                        if (part.inlineData && part.inlineData.data) {
+                            logger.info(`Successfully generated image for user ${userId}`);
+                            return {
+                                base64: part.inlineData.data,
+                                mimeType: part.inlineData.mimeType || 'image/png'
+                            };
+                        }
+                    }
+                }
+                
+                // If no image data found, check for text response that might contain image info
+                if (candidate.content && candidate.content.parts && candidate.content.parts[0] && candidate.content.parts[0].text) {
+                    const textResponse = candidate.content.parts[0].text;
+                    try {
+                        const parsedResponse = JSON.parse(textResponse);
+                        if (parsedResponse.image) {
+                            logger.info(`Successfully generated image for user ${userId}`);
+                            return parsedResponse.image;
+                        }
+                    } catch (parseError) {
+                        logger.debug('Response is not JSON, treating as plain text');
+                    }
+                }
+            }
+
+            logger.error('No image data found in response:', JSON.stringify(response.response, null, 2));
+            throw new Error('No image was generated in the response');
+
+        } catch (error) {
+            logger.error('Client library generation failed:', error.message);
+            throw error;
+        }
+    }
+
+    // Alternative method using Imagen API directly
+    async generateImageWithImagen(prompt, userId) {
+        try {
+            logger.info(`Generating image with Imagen for user ${userId} with prompt: ${prompt}`);
+            
+            // Validate the prompt
+            await this.validatePrompt(prompt);
+
+            // Get the Imagen model
+            const model = this.vertexai.getGenerativeModel({
+                model: 'imagegeneration@006'
+            });
+
             const request = {
                 contents: [{
                     role: 'user',
                     parts: [{
                         text: prompt
                     }]
-                }],
-                generationConfig: {
-                    responseMimeType: 'application/json',
-                    responseSchema: {
-                        type: 'object',
-                        properties: {
-                            image: {
-                                type: 'object',
-                                properties: {
-                                    url: { type: 'string' },
-                                    base64: { type: 'string' }
-                                }
-                            }
+                }]
+            };
+
+            const response = await model.generateContent(request);
+            
+            if (response.response && response.response.candidates && response.response.candidates[0]) {
+                const candidate = response.response.candidates[0];
+                
+                if (candidate.content && candidate.content.parts) {
+                    for (const part of candidate.content.parts) {
+                        if (part.inlineData && part.inlineData.data) {
+                            logger.info(`Successfully generated image with Imagen for user ${userId}`);
+                            return {
+                                base64: part.inlineData.data,
+                                mimeType: part.inlineData.mimeType || 'image/png'
+                            };
                         }
                     }
                 }
-            };
-
-            // Log request for debugging (excluding sensitive data)
-            logger.debug('Sending request with structure:', {
-                prompt: prompt.substring(0, 100) + '...',
-                model: 'imagegeneration@006'
-            });
-
-            // Generate the image using generateContent method
-            const response = await model.generateContent(request);
-            logger.info('Received response from image generation API');
-
-            // Parse the response
-            const responseText = response.response.text();
-            const parsedResponse = JSON.parse(responseText);
-
-            if (parsedResponse && parsedResponse.image) {
-                logger.info(`Successfully generated image for user ${userId}`);
-                return {
-                    url: parsedResponse.image.url,
-                    base64: parsedResponse.image.base64
-                };
-            } else {
-                logger.error('Unexpected response structure:', parsedResponse);
-                throw new Error('No image was generated in the response');
             }
+
+            throw new Error('No image data found in Imagen response');
+
         } catch (error) {
-            logger.error(`Error generating image: ${error.message}`);
-            
-            // Enhanced error handling with specific messages
-            if (error.message.includes('quota') || error.message.includes('rate limit')) {
-                throw new Error('Rate limit exceeded. Please try again later.');
-            } else if (error.message.includes('scope') || error.message.includes('authenticate')) {
-                logger.error('Authentication error details:', error);
-                throw new Error('Authentication failed. Please verify service account permissions.');
-            } else if (error.message.includes('ENOENT')) {
-                logger.error('File system error:', error);
-                throw new Error('Service configuration error. Please contact support.');
-            } else if (error.message.includes('permission') || error.message.includes('access')) {
-                throw new Error('Insufficient permissions. Please verify service account has the required roles.');
-            }
-            
-            throw new Error(`Failed to generate image: ${error.message}`);
+            logger.error(`Error with Imagen generation: ${error.message}`);
+            // Fall back to main generation method
+            return this.generateImage(prompt, userId);
         }
     }
 
@@ -147,7 +340,7 @@ class GeminiService {
         }
         
         // Add content safety validation
-        const unsafeContent = ['explicit', 'violence', 'hate', 'harassment'];
+        const unsafeContent = ['explicit', 'violence', 'hate', 'harassment', 'sexual', 'nude', 'nsfw'];
         const lowerPrompt = prompt.toLowerCase();
         
         for (const content of unsafeContent) {
