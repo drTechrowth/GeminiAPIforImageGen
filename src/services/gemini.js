@@ -1,5 +1,7 @@
 const { VertexAI } = require('@google-cloud/vertexai');
 const { GoogleAuth } = require('google-auth-library');
+const fs = require('fs');
+const path = require('path');
 const { logger } = require('../utils/logger');
 const config = require('../utils/config');
 
@@ -12,19 +14,27 @@ class GeminiService {
 
             // Parse credentials to verify JSON format
             this.credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
-
-            // Initialize Vertex AI directly with credentials object
-            this.vertexai = new VertexAI({
-                project: process.env.GOOGLE_CLOUD_PROJECT_ID || this.credentials.project_id,
-                location: process.env.GOOGLE_CLOUD_REGION || 'us-central1',
-                googleAuthOptions: {
-                    credentials: this.credentials
-                }
-            });
-
-            // Store project details for image generation
             this.projectId = process.env.GOOGLE_CLOUD_PROJECT_ID || this.credentials.project_id;
             this.location = process.env.GOOGLE_CLOUD_REGION || 'us-central1';
+
+            // Create temporary credentials file for Google libraries
+            this.setupCredentialsFile();
+
+            // Initialize Google Auth first
+            this.auth = new GoogleAuth({
+                keyFile: this.credentialsPath,
+                scopes: ['https://www.googleapis.com/auth/cloud-platform']
+            });
+
+            // Initialize Vertex AI with the credentials file path
+            this.vertexai = new VertexAI({
+                project: this.projectId,
+                location: this.location,
+                googleAuthOptions: {
+                    keyFile: this.credentialsPath,
+                    scopes: ['https://www.googleapis.com/auth/cloud-platform']
+                }
+            });
 
             logger.info('Successfully initialized Vertex AI client');
         } catch (error) {
@@ -33,18 +43,34 @@ class GeminiService {
         }
     }
 
+    setupCredentialsFile() {
+        try {
+            // Create /tmp directory if it doesn't exist
+            const tmpDir = '/tmp';
+            if (!fs.existsSync(tmpDir)) {
+                fs.mkdirSync(tmpDir, { recursive: true });
+            }
+
+            // Write credentials to temporary file
+            this.credentialsPath = path.join(tmpDir, 'gcp-credentials.json');
+            fs.writeFileSync(this.credentialsPath, JSON.stringify(this.credentials, null, 2));
+            
+            // Set environment variable for Google libraries
+            process.env.GOOGLE_APPLICATION_CREDENTIALS = this.credentialsPath;
+            
+            logger.info(`Credentials file created at: ${this.credentialsPath}`);
+        } catch (error) {
+            logger.error(`Error setting up credentials file: ${error.message}`);
+            throw error;
+        }
+    }
+
     async testAuth() {
         try {
             logger.info('Testing Google Cloud authentication...');
             
-            // Create a GoogleAuth instance to test authentication
-            const auth = new GoogleAuth({
-                credentials: this.credentials,
-                scopes: ['https://www.googleapis.com/auth/cloud-platform']
-            });
-
             // Get an authenticated client
-            const client = await auth.getClient();
+            const client = await this.auth.getClient();
             
             // Test by getting an access token
             const accessToken = await client.getAccessToken();
