@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: image-generation-service
+    env: node
+    region: ohio
+    plan: starter
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: GOOGLE_CLOUD_PROJECT_ID
+        sync: false
+      - key: GOOGLE_CLOUD_REGION
+        sync: false
+      - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
+        sync: false
+      - key: MAX_REQUESTS_PER_USER_PER_HOUR
+        value: 21
+      - key: MAX_CONCURRENT_GENERATIONS
+        value: 3
+      - key: LOG_LEVEL
+        value: info
