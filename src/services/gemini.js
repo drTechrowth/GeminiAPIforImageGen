@@ -221,125 +221,114 @@ class GeminiService {
         }
     }
 
-    // NEW: Smart prompt preprocessing to avoid content policy issues
-    preprocessPrompt(originalPrompt) {
+    // NEW: AI-powered prompt optimization using Gemini text model
+    async optimizePromptWithAI(originalPrompt) {
         try {
-            logger.info(`Preprocessing prompt: ${originalPrompt}`);
+            logger.info(`Optimizing prompt with AI: ${originalPrompt}`);
             
-            // First, perform basic validation
-            if (!originalPrompt || typeof originalPrompt !== 'string') {
-                throw new Error('Prompt is required and must be a string');
+            // Use Gemini Pro for text generation
+            const textModel = this.vertexai.preview.getGenerativeModel({
+                model: 'gemini-1.5-pro-preview-0514'
+            });
+
+            const optimizationPrompt = `You are an expert prompt engineer for AI image generation. Your task is to optimize the following image generation prompt to:
+
+1. Remove or replace any brand names with generic descriptions
+2. Ensure the description is detailed and specific for better image generation
+3. Use professional photography terminology
+4. Avoid any content that might trigger safety filters
+5. Make the prompt clear and actionable for an AI image generator
+6. Keep the core meaning and intent intact
+7. Add helpful context about composition, lighting, and style
+
+Original prompt: "${originalPrompt}"
+
+Please provide ONLY the optimized prompt without any explanation or additional text. The response should be a single, well-crafted prompt ready for image generation.
+
+Guidelines:
+- Replace brand names with generic terms (e.g., "Coca Cola" → "cola beverage")
+- Use inclusive and respectful language
+- Add professional photography context
+- Specify composition and lighting details
+- Ensure family-friendly content
+- Make it specific but not overly complex`;
+
+            const result = await textModel.generateContent({
+                contents: [{
+                    role: 'user',
+                    parts: [{ text: optimizationPrompt }]
+                }],
+                generationConfig: {
+                    temperature: 0.3, // Lower temperature for more consistent results
+                    topK: 20,
+                    topP: 0.8,
+                    maxOutputTokens: 500
+                }
+            });
+
+            if (result.response && result.response.candidates && result.response.candidates[0]) {
+                const optimizedPrompt = result.response.candidates[0].content.parts[0].text.trim();
+                
+                logger.info(`AI-optimized prompt: ${optimizedPrompt}`);
+                
+                return {
+                    original: originalPrompt,
+                    optimized: optimizedPrompt,
+                    method: 'ai_powered'
+                };
+            } else {
+                logger.warn('No response from AI optimization, falling back to rule-based');
+                return this.fallbackPromptOptimization(originalPrompt);
             }
 
-            if (originalPrompt.length > 1000) {
-                throw new Error('Prompt must be less than 1000 characters');
-            }
+        } catch (error) {
+            logger.error('AI prompt optimization failed:', error.message);
+            logger.info('Falling back to rule-based optimization');
+            return this.fallbackPromptOptimization(originalPrompt);
+        }
+    }
 
-            // Start with the original prompt
+    // Fallback rule-based prompt optimization (simplified version of old preprocessing)
+    fallbackPromptOptimization(originalPrompt) {
+        try {
             let processedPrompt = originalPrompt.trim();
 
-            // 1. Replace brand names with generic terms to avoid trademark issues
+            // Basic brand name replacements
             const brandReplacements = {
                 'nutramilk': 'nutritional milk product',
                 'coca cola': 'cola drink',
                 'pepsi': 'cola beverage',
                 'nike': 'athletic wear',
-                'adidas': 'sports brand',
-                'apple': 'tech device',
-                'samsung': 'electronic device',
-                'bmw': 'luxury car',
-                'mercedes': 'premium vehicle'
+                'adidas': 'sports brand'
             };
 
-            // Apply brand replacements (case insensitive)
             for (const [brand, replacement] of Object.entries(brandReplacements)) {
                 const regex = new RegExp(brand, 'gi');
                 processedPrompt = processedPrompt.replace(regex, replacement);
             }
 
-            // 2. Enhance demographic descriptions to be more AI-friendly
-            const demographicEnhancements = {
-                'african family': 'family of African descent',
-                'indian family': 'family of South Asian heritage',
-                'asian family': 'family of Asian heritage',
-                'elderly person': 'mature adult',
-                'kids': 'children',
-                'teenage': 'young adult'
-            };
-
-            for (const [original, enhanced] of Object.entries(demographicEnhancements)) {
-                const regex = new RegExp(original, 'gi');
-                processedPrompt = processedPrompt.replace(regex, enhanced);
+            // Add basic professional context
+            if (!processedPrompt.toLowerCase().includes('professional')) {
+                processedPrompt = `Professional photograph of ${processedPrompt}`;
             }
 
-            // 3. Add context and style guidance to make the prompt more specific and AI-friendly
-            const contextualAdditions = [];
-            
-            // Add professional photography context if not present
-            if (!processedPrompt.toLowerCase().includes('photo') && 
-                !processedPrompt.toLowerCase().includes('image') && 
-                !processedPrompt.toLowerCase().includes('picture')) {
-                contextualAdditions.push('professional photograph of');
-            }
-
-            // Add lighting guidance for better results
-            if (!processedPrompt.toLowerCase().includes('lighting') && 
-                !processedPrompt.toLowerCase().includes('light')) {
-                contextualAdditions.push('with natural lighting');
-            }
-
-            // Add quality modifiers
-            const qualityModifiers = ['high quality', 'detailed', 'realistic'];
-            const hasQualityModifier = qualityModifiers.some(modifier => 
-                processedPrompt.toLowerCase().includes(modifier)
-            );
-            
-            if (!hasQualityModifier) {
-                contextualAdditions.push('high quality and detailed');
-            }
-
-            // 4. Construct the final prompt
-            if (contextualAdditions.length > 0) {
-                processedPrompt = `${contextualAdditions.join(', ')} ${processedPrompt}`;
-            }
-
-            // 5. Add style guidance to avoid potential issues
-            const styleGuidance = [
-                'commercial photography style',
-                'clean background',
-                'professional composition'
-            ];
-
-            processedPrompt += `, ${styleGuidance.join(', ')}`;
-
-            // 6. Final safety check - remove any potentially problematic patterns
-            const safetyReplacements = {
-                'nude': 'natural',
-                'naked': 'plain',
-                'sexy': 'attractive',
-                'hot': 'appealing'
-            };
-
-            for (const [unsafe, safe] of Object.entries(safetyReplacements)) {
-                const regex = new RegExp(unsafe, 'gi');
-                processedPrompt = processedPrompt.replace(regex, safe);
-            }
-
-            logger.info(`Preprocessed prompt: ${processedPrompt}`);
-            
             return {
                 original: originalPrompt,
-                processed: processedPrompt,
-                changes: processedPrompt !== originalPrompt
+                optimized: processedPrompt,
+                method: 'rule_based'
             };
 
         } catch (error) {
-            logger.error('Error preprocessing prompt:', error.message);
-            throw error;
+            logger.error('Fallback optimization failed:', error.message);
+            return {
+                original: originalPrompt,
+                optimized: originalPrompt,
+                method: 'none'
+            };
         }
     }
 
-    // Updated validation that's more precise
+    // Basic validation (simplified)
     async validatePrompt(prompt) {
         if (!prompt || typeof prompt !== 'string') {
             throw new Error('Prompt is required and must be a string');
@@ -349,36 +338,16 @@ class GeminiService {
             throw new Error('Prompt must be less than 1000 characters');
         }
 
-        // Check for genuinely harmful content (more precise patterns)
+        // Basic harmful content check
         const harmfulPatterns = [
-            /\bexplicit\b|\bnsfw\b|\bnude\b|\bnaked\b|\bsex\b/i,
-            /\bviolence\b|\bblood\b|\bgore\b|\bdeath\b|\bkill\b/i,
+            /\bexplicit\b|\bnsfw\b|\bnude\b|\bnaked\b/i,
+            /\bviolence\b|\bblood\b|\bgore\b/i,
             /\bhate\b|\bdiscrimination\b|\bracist\b/i
-        ];
-
-        // More precise celebrity detection (full names or very specific terms)
-        const celebrityPatterns = [
-            // Full names only, not partial matches
-            /\bsachin tendulkar\b|\bvirat kohli\b|\bms dhoni\b|\brohit sharma\b/i,
-            /\bshah rukh khan\b|\bamitabh bachchan\b|\bsalman khan\b|\baamir khan\b/i,
-            /\bakshay kumar\b|\bdeepika padukone\b|\bpriyanka chopra\b/i,
-            /\bnarendra modi\b|\brahul gandhi\b|\barvind kejriwal\b/i,
-            /\belon musk\b|\bbill gates\b|\bjeff bezos\b/i,
-            /\bdonald trump\b|\bjoe biden\b/i,
-            /\bleonardo dicaprio\b|\bbrad pitt\b|\bangelina jolie\b/i,
-            /\btaylor swift\b|\bbeyonce\b|\brihanna\b/i,
-            /\bcristiano ronaldo\b|\blionel messi\b/i
         ];
 
         for (const pattern of harmfulPatterns) {
             if (pattern.test(prompt)) {
                 throw new Error('Prompt contains inappropriate content');
-            }
-        }
-
-        for (const pattern of celebrityPatterns) {
-            if (pattern.test(prompt)) {
-                throw new Error('Content policy violation. Please avoid prompts mentioning specific celebrities or public figures by name.');
             }
         }
 
@@ -389,22 +358,22 @@ class GeminiService {
         try {
             logger.info(`Generating image for user ${userId} with original prompt: ${prompt}`);
             
-            // NEW: Preprocess the prompt to avoid common issues
-            const promptResult = this.preprocessPrompt(prompt);
-            const finalPrompt = promptResult.processed;
-            
-            if (promptResult.changes) {
-                logger.info(`Prompt was enhanced from: "${promptResult.original}" to: "${finalPrompt}"`);
-            }
+            // Validate the original prompt
+            await this.validatePrompt(prompt);
 
-            // Validate the processed prompt
-            await this.validatePrompt(finalPrompt);
+            // NEW: Use AI to optimize the prompt
+            const promptResult = await this.optimizePromptWithAI(prompt);
+            const finalPrompt = promptResult.optimized;
+            
+            logger.info(`Prompt optimization method: ${promptResult.method}`);
+            if (promptResult.original !== promptResult.optimized) {
+                logger.info(`Prompt optimized from: "${promptResult.original}" to: "${finalPrompt}"`);
+            }
 
             // Test authentication before making the request
             try {
                 await this.testAuth();
                 logger.info('Authentication test passed');
-                logger.info('Skipping detailed permission validation, proceeding with image generation');
                 
             } catch (authError) {
                 logger.error('Authentication test failed:', authError.message);
@@ -423,7 +392,9 @@ class GeminiService {
                     return {
                         ...response,
                         promptUsed: finalPrompt,
-                        promptWasModified: promptResult.changes
+                        originalPrompt: prompt,
+                        promptWasOptimized: promptResult.original !== promptResult.optimized,
+                        optimizationMethod: promptResult.method
                     };
                 }
             } catch (restError) {
@@ -442,7 +413,9 @@ class GeminiService {
             return {
                 ...result,
                 promptUsed: finalPrompt,
-                promptWasModified: promptResult.changes
+                originalPrompt: prompt,
+                promptWasOptimized: promptResult.original !== promptResult.optimized,
+                optimizationMethod: promptResult.method
             };
 
         } catch (error) {
@@ -462,9 +435,8 @@ class GeminiService {
                 logger.error('Path too long error - likely credential configuration issue:', error);
                 throw new Error('Configuration error. Please verify credential setup.');
             } else if (error.message && (error.message.includes('content policy') || error.message.includes('safety'))) {
-                throw new Error('Content policy violation. The image request could not be processed due to safety guidelines.');
+                throw new Error('Content policy violation. The image request could not be processed due to safety guidelines. Please try rephrasing your request.');
             } else if (error.message && error.message.includes('Prompt contains inappropriate content')) {
-                // This is from our own validation
                 throw error;
             }
             
@@ -515,13 +487,6 @@ class GeminiService {
             const result = await response.json();
             logger.info('REST API response received');
             
-            // Log the response structure for debugging (without sensitive data)
-            logger.debug('Response structure:', {
-                hasPredictions: !!result.predictions,
-                predictionsLength: result.predictions ? result.predictions.length : 0,
-                firstPredictionKeys: result.predictions && result.predictions[0] ? Object.keys(result.predictions[0]) : []
-            });
-
             if (result.predictions && result.predictions[0] && result.predictions[0].bytesBase64Encoded) {
                 return {
                     base64: result.predictions[0].bytesBase64Encoded,
@@ -535,8 +500,6 @@ class GeminiService {
                 throw new Error('Content policy violation. The image request could not be processed due to safety guidelines.');
             }
 
-            // Log the full response structure for debugging
-            logger.error('Unexpected API response structure:', JSON.stringify(result, null, 2));
             throw new Error('No image data in REST API response - this may indicate a content policy violation or API issue');
 
         } catch (error) {
@@ -579,12 +542,6 @@ class GeminiService {
                     temperature: 0.4,
                 }
             };
-
-            // Log request for debugging (excluding sensitive data)
-            logger.debug('Sending request with structure:', {
-                prompt: prompt.substring(0, 100) + (prompt.length > 100 ? '...' : ''),
-                model: 'imagen-3.0-generate-001'
-            });
 
             // Generate the image
             const response = await model.generateContent(request);
