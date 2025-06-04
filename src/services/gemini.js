@@ -177,58 +177,14 @@ class GeminiService {
         }
     }
 
-    // Add method to validate service account permissions
-    async validateServiceAccountPermissions() {
-        try {
-            const { google } = require('googleapis');
-            const auth = await this.auth.getClient();
-            
-            // Test Cloud Resource Manager API access
-            const cloudresourcemanager = google.cloudresourcemanager({ 
-                version: 'v1', 
-                auth: auth 
-            });
-            
-            // Try to get project information
-            const project = await cloudresourcemanager.projects.get({
-                projectId: this.projectId
-            });
-            
-            logger.info(`Project validation successful: ${project.data.name}`);
-            
-            // Test Vertex AI API access by trying to list models
-            const aiplatform = google.aiplatform({ 
-                version: 'v1', 
-                auth: auth 
-            });
-            
-            // This will test if we have proper Vertex AI permissions
-            const modelsResponse = await aiplatform.projects.locations.models.list({
-                parent: `projects/${this.projectId}/locations/${this.location}`
-            });
-            
-            logger.info('Vertex AI permissions validated successfully');
-            return true;
-            
-        } catch (error) {
-            logger.error('Service account permission validation failed:', error.message);
-            
-            if (error.code === 403) {
-                throw new Error('Insufficient permissions. Please ensure your service account has these roles: Vertex AI User, Storage Object Admin, and Project Viewer.');
-            }
-            
-            throw error;
-        }
-    }
-
-    // NEW: AI-powered prompt optimization using Gemini text model
+    // FIXED: AI-powered prompt optimization using correct Gemini model
     async optimizePromptWithAI(originalPrompt) {
         try {
             logger.info(`Optimizing prompt with AI: ${originalPrompt}`);
             
-            // Use Gemini Pro for text generation
+            // Use the correct Gemini Pro model name
             const textModel = this.vertexai.preview.getGenerativeModel({
-                model: 'gemini-1.5-pro-preview-0514'
+                model: 'gemini-2.0-flash-001'  // Fixed: Use stable model version
             });
 
             const optimizationPrompt = `You are an expert prompt engineer for AI image generation. Your task is to optimize the following image generation prompt to:
@@ -246,12 +202,14 @@ Original prompt: "${originalPrompt}"
 Please provide ONLY the optimized prompt without any explanation or additional text. The response should be a single, well-crafted prompt ready for image generation.
 
 Guidelines:
-- Replace brand names with generic terms (e.g., "Coca Cola" → "cola beverage")
+- Replace brand names with generic terms (e.g., "Nutramilk" → "premium milk beverage", "260 Brands" → "nutrition company")
 - Use inclusive and respectful language
 - Add professional photography context
 - Specify composition and lighting details
 - Ensure family-friendly content
-- Make it specific but not overly complex`;
+- Make it specific but not overly complex
+- Use neutral backgrounds and lighting terms
+- Focus on the product and family interaction`;
 
             const result = await textModel.generateContent({
                 contents: [{
@@ -288,14 +246,17 @@ Guidelines:
         }
     }
 
-    // Fallback rule-based prompt optimization (simplified version of old preprocessing)
+    // ENHANCED: Better fallback rule-based prompt optimization
     fallbackPromptOptimization(originalPrompt) {
         try {
             let processedPrompt = originalPrompt.trim();
 
-            // Basic brand name replacements
+            // Enhanced brand name replacements
             const brandReplacements = {
-                'nutramilk': 'nutritional milk product',
+                'nutramilk': 'premium milk beverage',
+                'nutri milk': 'premium milk beverage',
+                '260 brands': 'nutrition company',
+                '260brands': 'nutrition company',
                 'coca cola': 'cola drink',
                 'pepsi': 'cola beverage',
                 'nike': 'athletic wear',
@@ -307,10 +268,28 @@ Guidelines:
                 processedPrompt = processedPrompt.replace(regex, replacement);
             }
 
-            // Add basic professional context
-            if (!processedPrompt.toLowerCase().includes('professional')) {
-                processedPrompt = `Professional photograph of ${processedPrompt}`;
+            // Remove "by [company]" references
+            processedPrompt = processedPrompt.replace(/\s+by\s+[^.]+/gi, '');
+
+            // Add professional photography context if not present
+            if (!processedPrompt.toLowerCase().includes('professional') && 
+                !processedPrompt.toLowerCase().includes('photograph')) {
+                processedPrompt = `Professional studio photograph of ${processedPrompt}`;
             }
+
+            // Add lighting and composition details for better results
+            if (!processedPrompt.toLowerCase().includes('lighting')) {
+                processedPrompt += ', soft professional lighting';
+            }
+
+            if (!processedPrompt.toLowerCase().includes('quality') && 
+                !processedPrompt.toLowerCase().includes('resolution')) {
+                processedPrompt += ', high quality composition';
+            }
+
+            // Clean up any duplicate words that might have been introduced
+            processedPrompt = processedPrompt.replace(/\bproduct\s+product\b/gi, 'product');
+            processedPrompt = processedPrompt.replace(/\s+/g, ' ').trim();
 
             return {
                 original: originalPrompt,
@@ -328,7 +307,7 @@ Guidelines:
         }
     }
 
-    // Basic validation (simplified)
+    // ENHANCED: Better prompt validation
     async validatePrompt(prompt) {
         if (!prompt || typeof prompt !== 'string') {
             throw new Error('Prompt is required and must be a string');
@@ -338,16 +317,18 @@ Guidelines:
             throw new Error('Prompt must be less than 1000 characters');
         }
 
-        // Basic harmful content check
+        // Enhanced harmful content check
         const harmfulPatterns = [
             /\bexplicit\b|\bnsfw\b|\bnude\b|\bnaked\b/i,
             /\bviolence\b|\bblood\b|\bgore\b/i,
-            /\bhate\b|\bdiscrimination\b|\bracist\b/i
+            /\bhate\b|\bdiscrimination\b|\bracist\b/i,
+            /\bweapon\b|\bgun\b|\bknife\b/i,
+            /\bdrug\b|\balcohol\b|\bsmok/i
         ];
 
         for (const pattern of harmfulPatterns) {
             if (pattern.test(prompt)) {
-                throw new Error('Prompt contains inappropriate content');
+                throw new Error('Prompt contains inappropriate content that may violate content policies');
             }
         }
 
@@ -361,7 +342,7 @@ Guidelines:
             // Validate the original prompt
             await this.validatePrompt(prompt);
 
-            // NEW: Use AI to optimize the prompt
+            // Use AI to optimize the prompt
             const promptResult = await this.optimizePromptWithAI(prompt);
             const finalPrompt = promptResult.optimized;
             
@@ -382,7 +363,7 @@ Guidelines:
 
             logger.info('Sending request to generate image...');
 
-            // Try using the REST API approach first
+            // Try using the REST API approach first with better error handling
             try {
                 const accessToken = await this.getAccessToken();
                 const response = await this.generateImageWithRestAPI(finalPrompt, accessToken);
@@ -398,25 +379,38 @@ Guidelines:
                     };
                 }
             } catch (restError) {
-                logger.warn(`REST API failed: ${restError.message}, trying fallback method`);
+                logger.warn(`REST API failed: ${restError.message}`);
                 
                 // If it's a content policy error, don't try fallback
-                if (restError.message.includes('content policy') || restError.message.includes('safety')) {
+                if (restError.message.includes('content policy') || 
+                    restError.message.includes('safety') ||
+                    restError.message.includes('blocked')) {
                     throw restError;
+                }
+                
+                // Try a more conservative prompt if the original failed
+                logger.info('Attempting with more conservative prompt...');
+                const conservativePrompt = this.makePromptMoreConservative(finalPrompt);
+                
+                try {
+                    const conservativeResponse = await this.generateImageWithRestAPI(conservativePrompt, await this.getAccessToken());
+                    if (conservativeResponse && conservativeResponse.base64) {
+                        logger.info(`Successfully generated image with conservative prompt`);
+                        return {
+                            ...conservativeResponse,
+                            promptUsed: conservativePrompt,
+                            originalPrompt: prompt,
+                            promptWasOptimized: true,
+                            optimizationMethod: 'conservative_fallback'
+                        };
+                    }
+                } catch (conservativeError) {
+                    logger.warn(`Conservative prompt also failed: ${conservativeError.message}`);
                 }
             }
 
-            // Fallback to client library approach
-            logger.info('Attempting fallback to client library approach...');
-            const result = await this.generateImageWithClient(finalPrompt, userId);
-            
-            return {
-                ...result,
-                promptUsed: finalPrompt,
-                originalPrompt: prompt,
-                promptWasOptimized: promptResult.original !== promptResult.optimized,
-                optimizationMethod: promptResult.method
-            };
+            // If REST API fails, throw a more specific error
+            throw new Error('Unable to generate image. This may be due to content policy restrictions. Please try rephrasing your request with more generic terms.');
 
         } catch (error) {
             logger.error(`Error generating image: ${error.message}`);
@@ -434,8 +428,8 @@ Guidelines:
             } else if (error.code === 'ENAMETOOLONG') {
                 logger.error('Path too long error - likely credential configuration issue:', error);
                 throw new Error('Configuration error. Please verify credential setup.');
-            } else if (error.message && (error.message.includes('content policy') || error.message.includes('safety'))) {
-                throw new Error('Content policy violation. The image request could not be processed due to safety guidelines. Please try rephrasing your request.');
+            } else if (error.message && (error.message.includes('content policy') || error.message.includes('safety') || error.message.includes('blocked'))) {
+                throw new Error('Content policy violation. The image request could not be processed due to safety guidelines. Please try rephrasing your request with more generic, family-friendly terms.');
             } else if (error.message && error.message.includes('Prompt contains inappropriate content')) {
                 throw error;
             }
@@ -444,6 +438,30 @@ Guidelines:
         }
     }
 
+    // NEW: Make prompt more conservative to avoid content policy issues
+    makePromptMoreConservative(prompt) {
+        let conservative = prompt;
+        
+        // Remove specific ethnic/racial descriptors and replace with more generic terms
+        conservative = conservative.replace(/\b(African|Black|White|Asian|Hispanic|Latino)\s+family/gi, 'diverse family');
+        
+        // Make product references more generic
+        conservative = conservative.replace(/\bmilk\s+(product|beverage)/gi, 'healthy beverage');
+        conservative = conservative.replace(/\bnutritional\s+/gi, 'healthy ');
+        
+        // Add more neutral, professional context
+        if (!conservative.includes('commercial')) {
+            conservative = conservative.replace('Professional', 'Professional commercial');
+        }
+        
+        // Ensure it's clearly a marketing/advertising context
+        conservative += ', advertising photography style, clean composition, family-friendly content';
+        
+        logger.info(`Made prompt more conservative: ${conservative}`);
+        return conservative;
+    }
+
+    // ENHANCED: Better REST API error handling
     async generateImageWithRestAPI(prompt, accessToken) {
         try {
             const fetch = require('node-fetch');
@@ -457,7 +475,12 @@ Guidelines:
                     }
                 ],
                 parameters: {
-                    sampleCount: 1
+                    sampleCount: 1,
+                    // Add safety settings to be more permissive for commercial content
+                    safetySetting: {
+                        category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+                        threshold: "BLOCK_ONLY_HIGH"
+                    }
                 }
             };
 
@@ -472,20 +495,33 @@ Guidelines:
                 body: JSON.stringify(requestBody)
             });
 
+            const responseText = await response.text();
+            logger.info(`REST API response status: ${response.status}`);
+
             if (!response.ok) {
-                const errorText = await response.text();
-                logger.error('REST API error response:', errorText);
+                logger.error('REST API error response:', responseText);
                 
                 // Check for specific error types
-                if (response.status === 400 && errorText.includes('content policy')) {
-                    throw new Error('Content policy violation. The image request could not be processed due to safety guidelines.');
+                if (response.status === 400) {
+                    if (responseText.includes('content policy') || responseText.includes('safety')) {
+                        throw new Error('Content policy violation. The image request could not be processed due to safety guidelines. Please try rephrasing with more generic terms.');
+                    } else if (responseText.includes('blocked')) {
+                        throw new Error('Request was blocked. Please try rephrasing your request with more neutral language.');
+                    }
                 }
                 
-                throw new Error(`REST API error: ${response.status} ${errorText}`);
+                throw new Error(`REST API error: ${response.status} ${responseText}`);
             }
 
-            const result = await response.json();
-            logger.info('REST API response received');
+            let result;
+            try {
+                result = JSON.parse(responseText);
+            } catch (parseError) {
+                logger.error('Failed to parse response JSON:', parseError);
+                throw new Error('Invalid response format from image generation API');
+            }
+            
+            logger.info('REST API response received and parsed successfully');
             
             if (result.predictions && result.predictions[0] && result.predictions[0].bytesBase64Encoded) {
                 return {
@@ -494,13 +530,23 @@ Guidelines:
                 };
             }
 
+            // Enhanced debugging for empty responses
+            logger.warn('Response structure:', JSON.stringify(result, null, 2));
+            
             // If no image data but response was successful, it might be a content policy issue
             if (result.predictions && result.predictions.length === 0) {
                 logger.warn('Empty predictions array - likely content policy violation');
-                throw new Error('Content policy violation. The image request could not be processed due to safety guidelines.');
+                throw new Error('Content policy violation. The image request could not be processed due to safety guidelines. Please try rephrasing with more generic, family-friendly terms.');
             }
 
-            throw new Error('No image data in REST API response - this may indicate a content policy violation or API issue');
+            if (result.predictions && result.predictions[0] && !result.predictions[0].bytesBase64Encoded) {
+                logger.warn('Prediction exists but no image data - checking for error messages');
+                if (result.predictions[0].error) {
+                    throw new Error(`Image generation failed: ${result.predictions[0].error}`);
+                }
+            }
+
+            throw new Error('No image data in REST API response. This typically indicates a content policy violation. Please try rephrasing your request.');
 
         } catch (error) {
             logger.error('REST API generation failed:', error.message);
@@ -515,66 +561,6 @@ Guidelines:
             return accessTokenResponse.token;
         } catch (error) {
             logger.error('Failed to get access token:', error.message);
-            throw error;
-        }
-    }
-
-    async generateImageWithClient(prompt, userId) {
-        try {
-            logger.info('Trying client library approach...');
-
-            // Use the correct image generation model
-            const model = this.vertexai.preview.getGenerativeModel({
-                model: 'imagen-3.0-generate-001'
-            });
-
-            // Create the request for image generation
-            const request = {
-                contents: [{
-                    role: 'user',
-                    parts: [{
-                        text: `Generate an image: ${prompt}`
-                    }]
-                }],
-                generationConfig: {
-                    candidateCount: 1,
-                    maxOutputTokens: 2048,
-                    temperature: 0.4,
-                }
-            };
-
-            // Generate the image
-            const response = await model.generateContent(request);
-            logger.info('Received response from image generation API');
-
-            // Check if response contains image data
-            if (response.response && response.response.candidates && response.response.candidates[0]) {
-                const candidate = response.response.candidates[0];
-                
-                // Check for image parts in the response
-                if (candidate.content && candidate.content.parts) {
-                    for (const part of candidate.content.parts) {
-                        if (part.inlineData && part.inlineData.data) {
-                            logger.info(`Successfully generated image for user ${userId}`);
-                            return {
-                                base64: part.inlineData.data,
-                                mimeType: part.inlineData.mimeType || 'image/png'
-                            };
-                        }
-                    }
-                }
-            }
-
-            throw new Error('No image data found in response - this may indicate a content policy violation');
-
-        } catch (error) {
-            logger.error('Client library generation failed:', error.message);
-            
-            // Check if it's a content policy error
-            if (error.message && (error.message.includes('content policy') || error.message.includes('safety'))) {
-                throw new Error('Content policy violation. The image request could not be processed due to safety guidelines.');
-            }
-            
             throw error;
         }
     }
