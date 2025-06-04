@@ -225,7 +225,7 @@ class GeminiService {
         try {
             logger.info(`Generating image for user ${userId} with prompt: ${prompt}`);
             
-            // First validate the prompt
+            // First validate the prompt - this will throw an error if invalid
             await this.validatePrompt(prompt);
 
             // Test authentication before making the request
@@ -252,6 +252,11 @@ class GeminiService {
                 }
             } catch (restError) {
                 logger.warn(`REST API failed: ${restError.message}, trying fallback method`);
+                
+                // If it's a content policy error, don't try fallback
+                if (restError.message.includes('content policy') || restError.message.includes('safety')) {
+                    throw restError;
+                }
             }
 
             // Fallback to client library approach
@@ -276,6 +281,9 @@ class GeminiService {
                 throw new Error('Configuration error. Please verify credential setup.');
             } else if (error.message && (error.message.includes('content policy') || error.message.includes('safety'))) {
                 throw new Error('Content policy violation. Please avoid prompts mentioning real people, celebrities, or inappropriate content.');
+            } else if (error.message && error.message.includes('Prompt contains inappropriate content')) {
+                // This is from our own validation
+                throw error;
             }
             
             throw error;
@@ -341,10 +349,13 @@ class GeminiService {
 
             // If no image data but response was successful, it might be a content policy issue
             if (result.predictions && result.predictions.length === 0) {
+                logger.warn('Empty predictions array - likely content policy violation');
                 throw new Error('Content policy violation. Please avoid prompts mentioning real people, celebrities, or inappropriate content.');
             }
 
-            throw new Error('No image data in REST API response');
+            // Log the full response structure for debugging
+            logger.error('Unexpected API response structure:', JSON.stringify(result, null, 2));
+            throw new Error('No image data in REST API response - this may indicate a content policy violation or API issue');
 
         } catch (error) {
             logger.error('REST API generation failed:', error.message);
@@ -368,15 +379,33 @@ class GeminiService {
             /hate|discrimination|racist/i
         ];
 
-        // Check for celebrity/public figure names (common ones)
+        // Enhanced celebrity/public figure detection
         const celebrityPatterns = [
-            /sachin tendulkar|sachin|tendulkar/i,
-            /virat kohli|virat|kohli/i,
-            /shah rukh khan|shahrukh/i,
-            /amitabh bachchan|amitabh/i,
-            /narendra modi|modi/i,
-            /elon musk|bill gates|jeff bezos/i,
-            // Add more as needed
+            // Cricket players
+            /sachin\s*tendulkar|sachin|tendulkar/i,
+            /virat\s*kohli|virat|kohli/i,
+            /ms\s*dhoni|dhoni/i,
+            /rohit\s*sharma|rohit/i,
+            // Bollywood actors
+            /shah\s*rukh\s*khan|shahrukh|srk/i,
+            /amitabh\s*bachchan|amitabh/i,
+            /salman\s*khan|salman/i,
+            /aamir\s*khan|aamir/i,
+            /akshay\s*kumar|akshay/i,
+            /deepika\s*padukone|deepika/i,
+            /priyanka\s*chopra|priyanka/i,
+            // Politicians
+            /narendra\s*modi|modi/i,
+            /rahul\s*gandhi|rahul/i,
+            /arvind\s*kejriwal|kejriwal/i,
+            // International celebrities
+            /elon\s*musk|bill\s*gates|jeff\s*bezos/i,
+            /donald\s*trump|joe\s*biden/i,
+            /leonardo\s*dicaprio|brad\s*pitt|angelina\s*jolie/i,
+            /taylor\s*swift|beyonce|rihanna/i,
+            /cristiano\s*ronaldo|lionel\s*messi/i,
+            // Generic terms for famous people
+            /celebrity|famous\s*person|movie\s*star|bollywood\s*actor|cricket\s*player/i
         ];
 
         for (const pattern of harmfulPatterns) {
@@ -457,10 +486,16 @@ class GeminiService {
                 }
             }
 
-            throw new Error('No image data found in response');
+            throw new Error('No image data found in response - this may indicate a content policy violation');
 
         } catch (error) {
             logger.error('Client library generation failed:', error.message);
+            
+            // Check if it's a content policy error
+            if (error.message && (error.message.includes('content policy') || error.message.includes('safety'))) {
+                throw new Error('Content policy violation. Please avoid prompts mentioning real people, celebrities, or inappropriate content.');
+            }
+            
             throw error;
         }
     }
