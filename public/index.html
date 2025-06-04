@@ -5,34 +5,61 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Image Generation Service</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         body {
-            background-color: #f8f9fa;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            min-height: 100vh;
         }
         .container {
-            max-width: 800px;
+            max-width: 1000px;
         }
         .header {
             text-align: center;
             margin: 2rem 0;
+            color: white;
+        }
+        .header h1 {
+            font-weight: 300;
+            font-size: 2.5rem;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
         }
         .card {
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
             margin-bottom: 2rem;
+            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.2);
         }
         .form-control:focus {
-            border-color: #6c757d;
-            box-shadow: 0 0 0 0.25rem rgba(108, 117, 125, 0.25);
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.25rem rgba(102, 126, 234, 0.25);
         }
         .btn-primary {
-            background-color: #6c757d;
-            border-color: #6c757d;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            border: none;
+            border-radius: 25px;
+            padding: 12px 30px;
+            font-weight: 500;
+            transition: all 0.3s ease;
         }
-        .btn-primary:hover, .btn-primary:focus {
-            background-color: #5a6268;
-            border-color: #5a6268;
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        .btn-success {
+            background: linear-gradient(45deg, #28a745, #20c997);
+            border: none;
+            border-radius: 25px;
+            padding: 8px 20px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+        .btn-success:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 3px 10px rgba(40, 167, 69, 0.4);
         }
         #result-container {
             display: none;
@@ -40,8 +67,12 @@
         }
         #generated-image {
             max-width: 100%;
-            border-radius: 5px;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+            transition: transform 0.3s ease;
+        }
+        #generated-image:hover {
+            transform: scale(1.02);
         }
         .loading {
             display: none;
@@ -51,33 +82,132 @@
         .spinner-border {
             width: 3rem;
             height: 3rem;
+            color: #667eea;
         }
         .error-message {
             color: #dc3545;
             margin-top: 1rem;
             display: none;
+            padding: 15px;
+            background: rgba(220, 53, 69, 0.1);
+            border-radius: 8px;
+            border-left: 4px solid #dc3545;
+        }
+        .success-message {
+            color: #28a745;
+            margin-top: 1rem;
+            display: none;
+            padding: 15px;
+            background: rgba(40, 167, 69, 0.1);
+            border-radius: 8px;
+            border-left: 4px solid #28a745;
         }
         .api-info {
             font-size: 0.9rem;
-            color: #6c757d;
+            color: rgba(255, 255, 255, 0.8);
             margin-top: 3rem;
-            padding-top: 1rem;
-            border-top: 1px solid #dee2e6;
+            padding: 2rem;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+        .history-section {
+            margin-top: 2rem;
+        }
+        .history-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        .history-item {
+            position: relative;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            transition: transform 0.3s ease;
+            cursor: pointer;
+        }
+        .history-item:hover {
+            transform: translateY(-5px);
+        }
+        .history-item img {
+            width: 100%;
+            height: 150px;
+            object-fit: cover;
+        }
+        .history-item .overlay {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(transparent, rgba(0,0,0,0.8));
+            color: white;
+            padding: 10px;
+            font-size: 0.8rem;
+        }
+        .download-controls {
+            margin-top: 1rem;
+            text-align: center;
+        }
+        .image-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+        .clear-history-btn {
+            background: linear-gradient(45deg, #dc3545, #c82333);
+            border: none;
+            border-radius: 20px;
+            padding: 8px 16px;
+            color: white;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+        }
+        .clear-history-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 3px 10px rgba(220, 53, 69, 0.4);
+        }
+        .stats-info {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 1rem;
+            color: white;
+            text-align: center;
+        }
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 2rem;
+            }
+            .history-grid {
+                grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            }
+            .image-actions {
+                flex-direction: column;
+                align-items: center;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container py-4">
         <div class="header">
-            <h1>Image Generation Service</h1>
-            <p class="lead">Generate images from text descriptions using AI</p>
+            <h1><i class="fas fa-magic"></i> AI Image Generator</h1>
+            <p class="lead">Transform your imagination into stunning visuals</p>
+        </div>
+
+        <div class="stats-info" id="stats-info">
+            <i class="fas fa-chart-bar"></i> <span id="total-generated">0</span> images generated in this session
         </div>
 
         <div class="card">
             <div class="card-body">
                 <form id="generation-form">
                     <div class="mb-3">
-                        <label for="prompt" class="form-label">Image Description</label>
+                        <label for="prompt" class="form-label"><i class="fas fa-pencil-alt"></i> Image Description</label>
                         <textarea 
                             class="form-control" 
                             id="prompt" 
@@ -86,33 +216,62 @@
                             required
                         ></textarea>
                         <div class="form-text">Be specific in your description for better results. Maximum 1000 characters.</div>
+                        <div class="mt-2">
+                            <small class="text-muted">Character count: <span id="char-count">0</span>/1000</small>
+                        </div>
                     </div>
-                    <button type="submit" class="btn btn-primary">Generate Image</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-wand-magic-sparkles"></i> Generate Image
+                    </button>
                 </form>
                 
                 <div class="loading" id="loading">
-                    <div class="spinner-border text-secondary" role="status">
+                    <div class="spinner-border" role="status">
                         <span class="visually-hidden">Loading...</span>
                     </div>
-                    <p class="mt-2">Generating your image... This may take a moment.</p>
+                    <p class="mt-2">✨ Creating your masterpiece... This may take a moment.</p>
                 </div>
                 
                 <div class="error-message" id="error-message"></div>
+                <div class="success-message" id="success-message"></div>
             </div>
         </div>
 
         <div id="result-container" class="card">
             <div class="card-body">
-                <h5 class="card-title">Generated Image</h5>
+                <h5 class="card-title"><i class="fas fa-image"></i> Generated Image</h5>
                 <p class="card-text" id="result-prompt"></p>
                 <div class="text-center">
                     <img id="generated-image" src="" alt="Generated image">
+                    <div class="image-actions">
+                        <button id="download-btn" class="btn btn-success">
+                            <i class="fas fa-download"></i> Download Image
+                        </button>
+                        <button id="copy-btn" class="btn btn-info">
+                            <i class="fas fa-copy"></i> Copy to Clipboard
+                        </button>
+                        <button id="share-btn" class="btn btn-warning">
+                            <i class="fas fa-share"></i> Share
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
 
+        <div class="history-section card" id="history-section" style="display: none;">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="card-title mb-0"><i class="fas fa-history"></i> Generation History</h5>
+                    <button id="clear-history" class="clear-history-btn">
+                        <i class="fas fa-trash"></i> Clear History
+                    </button>
+                </div>
+                <div class="history-grid" id="history-grid"></div>
+            </div>
+        </div>
+
         <div class="api-info">
-            <h5>API Usage</h5>
+            <h5><i class="fas fa-code"></i> API Usage</h5>
             <p>This service also provides a REST API for programmatic access:</p>
             <pre><code>POST /api/generate
 Content-Type: application/json
@@ -120,40 +279,74 @@ Content-Type: application/json
 {
   "prompt": "Your image description here"
 }</code></pre>
-            <p>For full API documentation, visit <a href="/api/docs">/api/docs</a></p>
+            <p>For full API documentation, visit <a href="/api/docs" style="color: #fff;">/api/docs</a></p>
         </div>
     </div>
 
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const form = document.getElementById('generation-form');
-            const loading = document.getElementById('loading');
-            const resultContainer = document.getElementById('result-container');
-            const generatedImage = document.getElementById('generated-image');
-            const resultPrompt = document.getElementById('result-prompt');
-            const errorMessage = document.getElementById('error-message');
+        class ImageGenerator {
+            constructor() {
+                this.generatedCount = 0;
+                this.currentImageData = null;
+                this.initializeElements();
+                this.loadHistory();
+                this.updateStats();
+                this.bindEvents();
+            }
 
-            form.addEventListener('submit', async function(e) {
+            initializeElements() {
+                this.form = document.getElementById('generation-form');
+                this.promptInput = document.getElementById('prompt');
+                this.charCount = document.getElementById('char-count');
+                this.loading = document.getElementById('loading');
+                this.resultContainer = document.getElementById('result-container');
+                this.generatedImage = document.getElementById('generated-image');
+                this.resultPrompt = document.getElementById('result-prompt');
+                this.errorMessage = document.getElementById('error-message');
+                this.successMessage = document.getElementById('success-message');
+                this.downloadBtn = document.getElementById('download-btn');
+                this.copyBtn = document.getElementById('copy-btn');
+                this.shareBtn = document.getElementById('share-btn');
+                this.historySection = document.getElementById('history-section');
+                this.historyGrid = document.getElementById('history-grid');
+                this.clearHistoryBtn = document.getElementById('clear-history');
+                this.statsInfo = document.getElementById('stats-info');
+                this.totalGenerated = document.getElementById('total-generated');
+            }
+
+            bindEvents() {
+                this.form.addEventListener('submit', (e) => this.handleSubmit(e));
+                this.promptInput.addEventListener('input', () => this.updateCharCount());
+                this.downloadBtn.addEventListener('click', () => this.downloadImage());
+                this.copyBtn.addEventListener('click', () => this.copyToClipboard());
+                this.shareBtn.addEventListener('click', () => this.shareImage());
+                this.clearHistoryBtn.addEventListener('click', () => this.clearHistory());
+            }
+
+            updateCharCount() {
+                const count = this.promptInput.value.length;
+                this.charCount.textContent = count;
+                this.charCount.style.color = count > 1000 ? '#dc3545' : '#6c757d';
+            }
+
+            async handleSubmit(e) {
                 e.preventDefault();
                 
-                const prompt = document.getElementById('prompt').value.trim();
+                const prompt = this.promptInput.value.trim();
                 
                 if (!prompt) {
-                    showError('Please enter an image description');
+                    this.showError('Please enter an image description');
                     return;
                 }
                 
                 if (prompt.length > 1000) {
-                    showError('Description is too long. Please keep it under 1000 characters.');
+                    this.showError('Description is too long. Please keep it under 1000 characters.');
                     return;
                 }
                 
-                // Hide previous results and errors
-                resultContainer.style.display = 'none';
-                errorMessage.style.display = 'none';
-                
-                // Show loading indicator
-                loading.style.display = 'block';
+                this.hideMessages();
+                this.resultContainer.style.display = 'none';
+                this.loading.style.display = 'block';
                 
                 try {
                     const response = await fetch('/api/generate', {
@@ -165,31 +358,230 @@ Content-Type: application/json
                     });
                     
                     const data = await response.json();
-                    
-                    // Hide loading indicator
-                    loading.style.display = 'none';
+                    this.loading.style.display = 'none';
                     
                     if (!response.ok) {
-                        showError(data.error || 'Failed to generate image');
+                        this.showError(data.error || 'Failed to generate image');
                         return;
                     }
                     
-                    // Display the result
-                    resultPrompt.textContent = `"${data.prompt}"`;
-                    generatedImage.src = data.data.url || `data:image/jpeg;base64,${data.data.base64}`;
-                    resultContainer.style.display = 'block';
+                    this.displayResult(data, prompt);
+                    this.saveToHistory(data, prompt);
+                    this.generatedCount++;
+                    this.updateStats();
                     
                 } catch (error) {
-                    loading.style.display = 'none';
-                    showError('An error occurred. Please try again later.');
+                    this.loading.style.display = 'none';
+                    this.showError('An error occurred. Please try again later.');
                     console.error('Error:', error);
                 }
-            });
-            
-            function showError(message) {
-                errorMessage.textContent = message;
-                errorMessage.style.display = 'block';
             }
+
+            displayResult(data, prompt) {
+                this.resultPrompt.textContent = `"${prompt}"`;
+                const imageUrl = data.data.url || `data:image/jpeg;base64,${data.data.base64}`;
+                this.generatedImage.src = imageUrl;
+                this.currentImageData = {
+                    url: imageUrl,
+                    prompt: prompt,
+                    base64: data.data.base64
+                };
+                this.resultContainer.style.display = 'block';
+                this.showSuccess('Image generated successfully!');
+            }
+
+            async downloadImage() {
+                if (!this.currentImageData) return;
+
+                try {
+                    const link = document.createElement('a');
+                    
+                    if (this.currentImageData.base64) {
+                        // For base64 images
+                        link.href = `data:image/png;base64,${this.currentImageData.base64}`;
+                    } else {
+                        // For URL images, we need to fetch and convert
+                        const response = await fetch(this.currentImageData.url);
+                        const blob = await response.blob();
+                        link.href = URL.createObjectURL(blob);
+                    }
+                    
+                    const sanitizedPrompt = this.currentImageData.prompt
+                        .replace(/[^a-zA-Z0-9\s]/g, '')
+                        .replace(/\s+/g, '_')
+                        .substring(0, 50);
+                    
+                    link.download = `ai_generated_${sanitizedPrompt}_${Date.now()}.png`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    
+                    this.showSuccess('Image downloaded successfully!');
+                } catch (error) {
+                    this.showError('Failed to download image. Please try right-clicking and saving.');
+                    console.error('Download error:', error);
+                }
+            }
+
+            async copyToClipboard() {
+                if (!this.currentImageData) return;
+
+                try {
+                    if (this.currentImageData.base64) {
+                        // Convert base64 to blob
+                        const response = await fetch(`data:image/png;base64,${this.currentImageData.base64}`);
+                        const blob = await response.blob();
+                        
+                        await navigator.clipboard.write([
+                            new ClipboardItem({ 'image/png': blob })
+                        ]);
+                        
+                        this.showSuccess('Image copied to clipboard!');
+                    } else {
+                        this.showError('Unable to copy this image format to clipboard.');
+                    }
+                } catch (error) {
+                    this.showError('Failed to copy image to clipboard.');
+                    console.error('Copy error:', error);
+                }
+            }
+
+            async shareImage() {
+                if (!this.currentImageData) return;
+
+                if (navigator.share) {
+                    try {
+                        const response = await fetch(this.currentImageData.url || `data:image/png;base64,${this.currentImageData.base64}`);
+                        const blob = await response.blob();
+                        const file = new File([blob], 'ai-generated-image.png', { type: 'image/png' });
+                        
+                        await navigator.share({
+                            title: 'AI Generated Image',
+                            text: `Check out this AI-generated image: "${this.currentImageData.prompt}"`,
+                            files: [file]
+                        });
+                    } catch (error) {
+                        console.error('Share error:', error);
+                        this.fallbackShare();
+                    }
+                } else {
+                    this.fallbackShare();
+                }
+            }
+
+            fallbackShare() {
+                const text = `Check out this AI-generated image: "${this.currentImageData.prompt}"`;
+                if (navigator.clipboard) {
+                    navigator.clipboard.writeText(text);
+                    this.showSuccess('Description copied to clipboard for sharing!');
+                } else {
+                    this.showError('Sharing not supported on this device.');
+                }
+            }
+
+            saveToHistory(data, prompt) {
+                try {
+                    let history = JSON.parse(sessionStorage.getItem('imageHistory') || '[]');
+                    
+                    const historyItem = {
+                        id: Date.now(),
+                        prompt: prompt,
+                        url: data.data.url || `data:image/jpeg;base64,${data.data.base64}`,
+                        base64: data.data.base64,
+                        timestamp: new Date().toISOString(),
+                        date: new Date().toLocaleDateString()
+                    };
+                    
+                    history.unshift(historyItem); // Add to beginning
+                    
+                    // Keep only last 20 items
+                    if (history.length > 20) {
+                        history = history.slice(0, 20);
+                    }
+                    
+                    sessionStorage.setItem('imageHistory', JSON.stringify(history));
+                    this.loadHistory();
+                } catch (error) {
+                    console.error('Failed to save to history:', error);
+                }
+            }
+
+            loadHistory() {
+                try {
+                    const history = JSON.parse(sessionStorage.getItem('imageHistory') || '[]');
+                    
+                    if (history.length === 0) {
+                        this.historySection.style.display = 'none';
+                        return;
+                    }
+                    
+                    this.historySection.style.display = 'block';
+                    this.historyGrid.innerHTML = '';
+                    
+                    history.forEach(item => {
+                        const historyItem = document.createElement('div');
+                        historyItem.className = 'history-item';
+                        historyItem.innerHTML = `
+                            <img src="${item.url}" alt="Generated image" loading="lazy">
+                            <div class="overlay">
+                                <div>${item.prompt.substring(0, 60)}${item.prompt.length > 60 ? '...' : ''}</div>
+                                <small>${item.date}</small>
+                            </div>
+                        `;
+                        
+                        historyItem.addEventListener('click', () => {
+                            this.currentImageData = {
+                                url: item.url,
+                                prompt: item.prompt,
+                                base64: item.base64
+                            };
+                            this.generatedImage.src = item.url;
+                            this.resultPrompt.textContent = `"${item.prompt}"`;
+                            this.resultContainer.style.display = 'block';
+                            this.resultContainer.scrollIntoView({ behavior: 'smooth' });
+                        });
+                        
+                        this.historyGrid.appendChild(historyItem);
+                    });
+                } catch (error) {
+                    console.error('Failed to load history:', error);
+                }
+            }
+
+            clearHistory() {
+                if (confirm('Are you sure you want to clear all generation history?')) {
+                    sessionStorage.removeItem('imageHistory');
+                    this.loadHistory();
+                    this.showSuccess('History cleared successfully!');
+                }
+            }
+
+            updateStats() {
+                const history = JSON.parse(sessionStorage.getItem('imageHistory') || '[]');
+                this.totalGenerated.textContent = history.length;
+            }
+
+            showError(message) {
+                this.errorMessage.textContent = message;
+                this.errorMessage.style.display = 'block';
+                setTimeout(() => this.hideMessages(), 5000);
+            }
+
+            showSuccess(message) {
+                this.successMessage.textContent = message;
+                this.successMessage.style.display = 'block';
+                setTimeout(() => this.hideMessages(), 3000);
+            }
+
+            hideMessages() {
+                this.errorMessage.style.display = 'none';
+                this.successMessage.style.display = 'none';
+            }
+        }
+
+        // Initialize the application when DOM is loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            new ImageGenerator();
         });
     </script>
 </body>
