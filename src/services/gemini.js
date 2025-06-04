@@ -188,19 +188,13 @@ class GeminiService {
             const optimizationPrompt = `
     You are an expert AI prompt engineer specializing in image generation and content safety. Optimize the following prompt using the following directives:
 
-    1. Replace specific ethnic or racial references with inclusive terms like "diverse individuals" or "multicultural group".
+    1. Change specific racial groups to models for that Racial groups.
     2. Replace brand names with generic, descriptive alternatives.
     3. Use commercial and professional photography language (e.g., "studio lighting", "high-resolution").
     4. Avoid triggering safety filters—no references to controversial, explicit, or culturally sensitive content.
     5. Highlight universal emotions, relatable human interactions, and inclusive scenarios.
     6. Reinforce advertising intent by incorporating product or lifestyle context.
     7. Ensure the prompt is wholesome, respectful, and family-friendly.
-
-    Examples:
-    - “African woman” → “woman from a diverse background”
-    - “Nike shoes” → “branded athletic shoes”
-    - “dark-skinned” → “individual of varied complexion”
-    - “Nutramilk product” → “a packaged health drink”
 
     Now optimize this prompt accordingly:
 
