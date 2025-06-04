@@ -228,17 +228,17 @@ class GeminiService {
             // First validate the prompt
             await this.validatePrompt(prompt);
 
-            // Test authentication and permissions before making the request
+            // Test authentication before making the request
             try {
                 await this.testAuth();
                 logger.info('Authentication test passed');
                 
-                // Also validate service account permissions
-                await this.validateServiceAccountPermissions();
-                logger.info('Permission validation passed, proceeding with image generation');
+                // Skip permission validation since it requires googleapis
+                // The Vertex AI client will handle permission errors appropriately
+                logger.info('Skipping detailed permission validation, proceeding with image generation');
                 
             } catch (authError) {
-                logger.error('Authentication/Permission test failed:', authError.message);
+                logger.error('Authentication test failed:', authError.message);
                 throw authError; // Re-throw the specific error
             }
 
