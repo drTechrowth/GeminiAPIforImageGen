@@ -184,32 +184,30 @@ class GeminiService {
             
             // Use the correct Gemini Pro model name
             const textModel = this.vertexai.preview.getGenerativeModel({
-                model: 'gemini-2.0-flash-001'  // Fixed: Use stable model version
+                model: 'gemini-2.0-flash-001'
             });
 
-            const optimizationPrompt = `You are an expert prompt engineer for AI image generation. Your task is to optimize the following image generation prompt to:
+            const optimizationPrompt = `You are an expert prompt engineer for AI image generation with deep knowledge of content policies. Your task is to optimize the following image generation prompt to:
 
-1. Remove or replace any brand names with generic descriptions
-2. Ensure the description is detailed and specific for better image generation
-3. Use professional photography terminology
-4. Avoid any content that might trigger safety filters
-5. Make the prompt clear and actionable for an AI image generator
-6. Keep the core meaning and intent intact
-7. Add helpful context about composition, lighting, and style
+    1. Replace specific ethnic/racial descriptors with inclusive, diverse terms
+    2. Remove or replace brand names with generic descriptions
+    3. Use professional photography terminology
+    4. Avoid content that might trigger safety filters
+    5. Focus on universal human experiences and emotions
+    6. Emphasize commercial/advertising context to signal appropriate use
+    7. Use neutral, family-friendly language throughout
 
-Original prompt: "${originalPrompt}"
+    CRITICAL GUIDELINES:
+    - Instead of "African family" use "diverse family" or "multicultural family"
+    - Instead of specific ethnicities, use "people of different backgrounds"
+    - Focus on emotions and interactions rather than physical descriptions
+    - Use commercial photography terms to establish context
+    - Keep descriptions wholesome and universally appropriate
+    - Avoid any terms that could be misinterpreted
 
-Please provide ONLY the optimized prompt without any explanation or additional text. The response should be a single, well-crafted prompt ready for image generation.
+    Original prompt: "${originalPrompt}"
 
-Guidelines:
-- Replace brand names with generic terms (e.g., "Nutramilk" → "premium milk beverage", "260 Brands" → "nutrition company")
-- Use inclusive and respectful language
-- Add professional photography context
-- Specify composition and lighting details
-- Ensure family-friendly content
-- Make it specific but not overly complex
-- Use neutral backgrounds and lighting terms
-- Focus on the product and family interaction`;
+    Return ONLY the optimized prompt without quotes or explanations. Make it commercial photography focused and completely safe for all audiences.`;
 
             const result = await textModel.generateContent({
                 contents: [{
@@ -217,15 +215,21 @@ Guidelines:
                     parts: [{ text: optimizationPrompt }]
                 }],
                 generationConfig: {
-                    temperature: 0.3, // Lower temperature for more consistent results
-                    topK: 20,
-                    topP: 0.8,
-                    maxOutputTokens: 500
+                    temperature: 0.1, // Very low temperature for consistent, safe results
+                    topK: 10,
+                    topP: 0.6,
+                    maxOutputTokens: 400
                 }
             });
 
             if (result.response && result.response.candidates && result.response.candidates[0]) {
-                const optimizedPrompt = result.response.candidates[0].content.parts[0].text.trim();
+                let optimizedPrompt = result.response.candidates[0].content.parts[0].text.trim();
+                
+                // Remove quotes if they were added
+                optimizedPrompt = optimizedPrompt.replace(/^["']|["']$/g, '');
+                
+                // Apply additional safety filters
+                optimizedPrompt = this.applySafetyFilters(optimizedPrompt);
                 
                 logger.info(`AI-optimized prompt: ${optimizedPrompt}`);
                 
