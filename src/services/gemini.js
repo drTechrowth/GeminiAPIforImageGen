@@ -177,37 +177,37 @@ class GeminiService {
         }
     }
 
-    // FIXED: AI-powered prompt optimization using correct Gemini model
     async optimizePromptWithAI(originalPrompt) {
         try {
             logger.info(`Optimizing prompt with AI: ${originalPrompt}`);
-            
-            // Use the correct Gemini Pro model name
+
             const textModel = this.vertexai.preview.getGenerativeModel({
                 model: 'gemini-2.0-flash-001'
             });
 
-            const optimizationPrompt = `You are an expert prompt engineer for AI image generation with deep knowledge of content policies. Your task is to optimize the following image generation prompt to:
+            const optimizationPrompt = `
+    You are an expert AI prompt engineer specializing in image generation and content safety. Optimize the following prompt using the following directives:
 
-    1. Replace specific ethnic/racial descriptors with inclusive, diverse terms
-    2. Remove or replace brand names with generic descriptions
-    3. Use professional photography terminology
-    4. Avoid content that might trigger safety filters
-    5. Focus on universal human experiences and emotions
-    6. Emphasize commercial/advertising context to signal appropriate use
-    7. Use neutral, family-friendly language throughout
+    1. Replace specific ethnic or racial references with inclusive terms like "diverse individuals" or "multicultural group".
+    2. Replace brand names with generic, descriptive alternatives.
+    3. Use commercial and professional photography language (e.g., "studio lighting", "high-resolution").
+    4. Avoid triggering safety filters—no references to controversial, explicit, or culturally sensitive content.
+    5. Highlight universal emotions, relatable human interactions, and inclusive scenarios.
+    6. Reinforce advertising intent by incorporating product or lifestyle context.
+    7. Ensure the prompt is wholesome, respectful, and family-friendly.
 
-    CRITICAL GUIDELINES:
-    - Instead of "African family" use "diverse family" or "multicultural family"
-    - Instead of specific ethnicities, use "people of different backgrounds"
-    - Focus on emotions and interactions rather than physical descriptions
-    - Use commercial photography terms to establish context
-    - Keep descriptions wholesome and universally appropriate
-    - Avoid any terms that could be misinterpreted
+    Examples:
+    - “African woman” → “woman from a diverse background”
+    - “Nike shoes” → “branded athletic shoes”
+    - “dark-skinned” → “individual of varied complexion”
+    - “Nutramilk product” → “a packaged health drink”
 
-    Original prompt: "${originalPrompt}"
+    Now optimize this prompt accordingly:
 
-    Return ONLY the optimized prompt without quotes or explanations. Make it commercial photography focused and completely safe for all audiences.`;
+    "${originalPrompt}"
+
+    Return only the improved prompt with no quotes or explanations.
+    `;
 
             const result = await textModel.generateContent({
                 contents: [{
@@ -215,40 +215,42 @@ class GeminiService {
                     parts: [{ text: optimizationPrompt }]
                 }],
                 generationConfig: {
-                    temperature: 0.1, // Very low temperature for consistent, safe results
+                    temperature: 0.1,
                     topK: 10,
                     topP: 0.6,
                     maxOutputTokens: 400
                 }
             });
 
-            if (result.response && result.response.candidates && result.response.candidates[0]) {
-                let optimizedPrompt = result.response.candidates[0].content.parts[0].text.trim();
-                
-                // Remove quotes if they were added
-                optimizedPrompt = optimizedPrompt.replace(/^["']|["']$/g, '');
-                
-                // Apply additional safety filters
-                optimizedPrompt = this.applySafetyFilters(optimizedPrompt);
-                
+            const candidate = result?.response?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+
+            if (candidate) {
+                const optimizedPrompt = candidate.replace(/^["']|["']$/g, '');
                 logger.info(`AI-optimized prompt: ${optimizedPrompt}`);
-                
                 return {
                     original: originalPrompt,
                     optimized: optimizedPrompt,
                     method: 'ai_powered'
                 };
             } else {
-                logger.warn('No response from AI optimization, falling back to rule-based');
-                return this.fallbackPromptOptimization(originalPrompt);
+                logger.warn('No valid AI response. Returning original prompt.');
+                return {
+                    original: originalPrompt,
+                    optimized: originalPrompt,
+                    method: 'fallback_no_change'
+                };
             }
 
         } catch (error) {
             logger.error('AI prompt optimization failed:', error.message);
-            logger.info('Falling back to rule-based optimization');
-            return this.fallbackPromptOptimization(originalPrompt);
+            return {
+                original: originalPrompt,
+                optimized: originalPrompt,
+                method: 'error_fallback'
+            };
         }
     }
+
 
     // ENHANCED: Better fallback rule-based prompt optimization
     fallbackPromptOptimization(originalPrompt) {
