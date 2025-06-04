@@ -50,8 +50,19 @@ class GeminiService {
             const credString = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
             logger.info(`Credential string length: ${credString.length}`);
             
+            // Log first and last 50 characters to check for corruption
+            logger.info(`First 50 chars: ${credString.substring(0, 50)}`);
+            logger.info(`Last 50 chars: ${credString.substring(credString.length - 50)}`);
+            
             // Try to parse the JSON
             this.credentials = JSON.parse(credString);
+            
+            // Check private key format in detail
+            const privateKey = this.credentials.private_key;
+            logger.info(`Private key starts with: ${privateKey.substring(0, 30)}`);
+            logger.info(`Private key ends with: ${privateKey.substring(privateKey.length - 30)}`);
+            logger.info(`Private key contains \\n: ${privateKey.includes('\\n')}`);
+            logger.info(`Private key contains actual newlines: ${privateKey.includes('\n')}`);
             
             // Validate required fields
             const requiredFields = ['type', 'project_id', 'private_key_id', 'private_key', 'client_email', 'client_id', 'auth_uri', 'token_uri'];
@@ -71,10 +82,13 @@ class GeminiService {
                 throw new Error('Invalid private key format. Missing PEM headers.');
             }
             
-            // Check for common newline issues in private key
-            if (!this.credentials.private_key.includes('\n')) {
+            // Fix private key newlines - this is the most common issue
+            if (privateKey.includes('\\n') && !privateKey.includes('\n')) {
+                logger.info('Converting escaped newlines to actual newlines in private key');
+                this.credentials.private_key = privateKey.replace(/\\n/g, '\n');
+            } else if (!privateKey.includes('\n')) {
                 logger.warn('Private key appears to be missing newlines. Attempting to fix...');
-                this.credentials.private_key = this.credentials.private_key
+                this.credentials.private_key = privateKey
                     .replace(/-----BEGIN PRIVATE KEY-----/g, '-----BEGIN PRIVATE KEY-----\n')
                     .replace(/-----END PRIVATE KEY-----/g, '\n-----END PRIVATE KEY-----')
                     .replace(/(.{64})/g, '$1\n')
