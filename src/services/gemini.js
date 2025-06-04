@@ -147,29 +147,99 @@ class GeminiService {
         }
     }
 
-    // IMPROVED: Lighter prompt optimization that's less likely to trigger filters
-    async optimizePromptMinimally(originalPrompt) {
+    // Enhanced prompt sanitization with more comprehensive filtering
+    sanitizePrompt(prompt) {
+        let sanitized = prompt.trim();
+
+        // Remove problematic words that often trigger content policies
+        const problematicTerms = {
+            // People-related terms that can be problematic
+            'person': 'figure',
+            'people': 'figures',
+            'human': 'character',
+            'humans': 'characters',
+            'man': 'male figure',
+            'woman': 'female figure',
+            'men': 'male figures',
+            'women': 'female figures',
+            'boy': 'young male character',
+            'girl': 'young female character',
+            'child': 'young character',
+            'children': 'young characters',
+            'baby': 'infant character',
+            
+            // Appearance-related terms
+            'beautiful': 'elegant',
+            'sexy': 'stylish',
+            'attractive': 'appealing',
+            'gorgeous': 'lovely',
+            'handsome': 'distinguished',
+            
+            // Body-related terms
+            'body': 'form',
+            'face': 'features',
+            'skin': 'surface',
+            
+            // Brand names
+            'nike': 'athletic brand',
+            'adidas': 'sports brand',
+            'apple': 'tech company',
+            'google': 'search engine',
+            'facebook': 'social media',
+            'instagram': 'photo app',
+            'twitter': 'social platform',
+            'coca cola': 'cola drink',
+            'pepsi': 'cola beverage',
+            'mcdonalds': 'fast food',
+            'starbucks': 'coffee shop',
+            
+            // Potentially sensitive locations
+            'school': 'educational building',
+            'hospital': 'medical facility',
+            'church': 'religious building',
+            'mosque': 'religious building',
+            'temple': 'religious building'
+        };
+
+        // Apply replacements with word boundaries
+        for (const [term, replacement] of Object.entries(problematicTerms)) {
+            const regex = new RegExp(`\\b${term}\\b`, 'gi');
+            sanitized = sanitized.replace(regex, replacement);
+        }
+
+        // Remove multiple spaces and clean up
+        sanitized = sanitized.replace(/\s+/g, ' ').trim();
+
+        return sanitized;
+    }
+
+    // Enhanced prompt optimization with better content policy awareness
+    async optimizePromptForPolicy(originalPrompt) {
         try {
-            logger.info(`Minimally optimizing prompt: ${originalPrompt}`);
+            logger.info(`Optimizing prompt for content policy: ${originalPrompt}`);
 
             const textModel = this.vertexai.preview.getGenerativeModel({
                 model: 'gemini-2.0-flash-001'
             });
 
             const optimizationPrompt = `
-You are a prompt optimizer for image generation. Make minimal changes to improve this prompt while avoiding content policy issues:
+You are an expert at creating prompts for Google's image generation API that comply with their content policies.
+
+Transform this prompt to avoid content policy violations while preserving the creative intent:
 
 Rules:
-1. Keep the original meaning and intent
-2. Only replace obvious brand names with generic terms if present
-3. Make language more descriptive but neutral
-4. Don't add commercial or advertising language unless already present
-5. Keep it natural and simple
+1. Replace specific people/celebrities with generic descriptions
+2. Use artistic and creative language instead of realistic human descriptions
+3. Focus on objects, landscapes, art styles, and abstract concepts
+4. Avoid brand names, logos, copyrighted characters
+5. Use terms like "artistic rendering", "stylized", "illustration style"
+6. Replace "photo" or "realistic" with "artwork", "painting", "digital art"
+7. Avoid describing human features in detail
+8. Make it sound more like an art commission than a photo request
 
-Original prompt: "${originalPrompt}"
+Original: "${originalPrompt}"
 
-Return only the improved prompt, no quotes or explanations.
-`;
+Return only the optimized prompt, no explanations:`;
 
             const result = await textModel.generateContent({
                 contents: [{
@@ -177,10 +247,10 @@ Return only the improved prompt, no quotes or explanations.
                     parts: [{ text: optimizationPrompt }]
                 }],
                 generationConfig: {
-                    temperature: 0.1,
-                    topK: 5,
-                    topP: 0.3,
-                    maxOutputTokens: 200
+                    temperature: 0.2,
+                    topK: 10,
+                    topP: 0.5,
+                    maxOutputTokens: 300
                 }
             });
 
@@ -188,67 +258,54 @@ Return only the improved prompt, no quotes or explanations.
 
             if (candidate) {
                 const optimizedPrompt = candidate.replace(/^["']|["']$/g, '');
-                logger.info(`Minimally optimized prompt: ${optimizedPrompt}`);
+                logger.info(`AI optimized prompt: ${optimizedPrompt}`);
                 return {
                     original: originalPrompt,
                     optimized: optimizedPrompt,
-                    method: 'minimal_ai'
+                    method: 'ai_policy_optimization'
                 };
             } else {
-                return {
-                    original: originalPrompt,
-                    optimized: originalPrompt,
-                    method: 'no_change'
-                };
+                throw new Error('No optimization result');
             }
 
         } catch (error) {
-            logger.error('Minimal AI optimization failed:', error.message);
-            return {
-                original: originalPrompt,
-                optimized: originalPrompt,
-                method: 'error_fallback'
-            };
+            logger.error('AI optimization failed:', error.message);
+            // Fallback to rule-based optimization
+            return this.ruleBasedOptimization(originalPrompt);
         }
     }
 
-    // SIMPLIFIED: Much lighter rule-based optimization
-    lightweightPromptOptimization(originalPrompt) {
-        try {
-            let processedPrompt = originalPrompt.trim();
+    // Rule-based optimization as fallback
+    ruleBasedOptimization(originalPrompt) {
+        let optimized = this.sanitizePrompt(originalPrompt);
 
-            // Only replace obvious brand names
-            const brandReplacements = {
-                'coca cola': 'cola drink',
-                'pepsi': 'cola beverage',
-                'nike': 'athletic wear',
-                'adidas': 'sports brand',
-                'mcdonalds': 'fast food restaurant',
-                'starbucks': 'coffee shop'
-            };
+        // Add safe artistic modifiers
+        const safeModifiers = [
+            'digital artwork of',
+            'artistic illustration of',
+            'stylized rendering of',
+            'creative visualization of',
+            'artistic interpretation of'
+        ];
 
-            for (const [brand, replacement] of Object.entries(brandReplacements)) {
-                const regex = new RegExp(`\\b${brand}\\b`, 'gi');
-                processedPrompt = processedPrompt.replace(regex, replacement);
-            }
+        // Check if prompt already has artistic language
+        const hasArtisticLanguage = /\b(art|artistic|illustration|painting|drawing|digital|stylized|rendered)\b/i.test(optimized);
 
-            // Clean up spacing
-            processedPrompt = processedPrompt.replace(/\s+/g, ' ').trim();
-
-            return {
-                original: originalPrompt,
-                optimized: processedPrompt,
-                method: 'lightweight_rules'
-            };
-
-        } catch (error) {
-            logger.error('Lightweight optimization failed:', error.message);
-            return {
-                original: originalPrompt,
-                optimized: originalPrompt,
-                method: 'none'
-            };
+        if (!hasArtisticLanguage) {
+            const randomModifier = safeModifiers[Math.floor(Math.random() * safeModifiers.length)];
+            optimized = `${randomModifier} ${optimized}`;
         }
+
+        // Add style suffix to make it more artistic
+        if (!optimized.includes('style') && !optimized.includes('art')) {
+            optimized += ', digital art style';
+        }
+
+        return {
+            original: originalPrompt,
+            optimized: optimized,
+            method: 'rule_based_safe'
+        };
     }
 
     async validatePrompt(prompt) {
@@ -260,17 +317,26 @@ Return only the improved prompt, no quotes or explanations.
             throw new Error('Prompt must be less than 1000 characters');
         }
 
-        // Minimal harmful content check - only obvious violations
+        // More comprehensive harmful content check
         const harmfulPatterns = [
-            /\b(explicit|nsfw|nude|naked)\b/i,
-            /\b(violence|blood|gore|kill)\b/i,
-            /\b(hate|racist|discrimination)\b/i,
-            /\b(weapon|gun|knife|bomb)\b/i
+            // Explicit content
+            /\b(explicit|nsfw|nude|naked|sexual|erotic|porn)\b/i,
+            // Violence
+            /\b(violence|blood|gore|kill|murder|death|weapon|gun|knife|bomb|explosion)\b/i,
+            // Hate speech
+            /\b(hate|racist|discrimination|nazi|terrorist)\b/i,
+            // Drugs
+            /\b(drugs|cocaine|heroin|meth|marijuana|weed|smoking|alcohol|drunk)\b/i,
+            // Copyrighted characters
+            /\b(mickey mouse|superman|batman|spiderman|pokemon|naruto|mario|sonic)\b/i,
+            // Celebrities (add more as needed)
+            /\b(elon musk|donald trump|taylor swift|leonardo dicaprio|angelina jolie)\b/i
         ];
 
         for (const pattern of harmfulPatterns) {
             if (pattern.test(prompt)) {
-                throw new Error('Prompt contains inappropriate content');
+                logger.warn(`Prompt flagged by pattern: ${pattern.source}`);
+                throw new Error('Prompt contains potentially inappropriate content');
             }
         }
 
@@ -283,11 +349,27 @@ Return only the improved prompt, no quotes or explanations.
             
             await this.validatePrompt(prompt);
 
-            // Try different optimization strategies
+            // Enhanced strategy sequence with more policy-aware optimizations
             const strategies = [
-                () => ({ original: prompt, optimized: prompt, method: 'none' }), // No optimization first
-                () => this.lightweightPromptOptimization(prompt), // Light rules
-                () => this.optimizePromptMinimally(prompt) // AI optimization as last resort
+                // Strategy 1: Try original with basic sanitization
+                () => ({
+                    original: prompt,
+                    optimized: this.sanitizePrompt(prompt),
+                    method: 'basic_sanitization'
+                }),
+                
+                // Strategy 2: Rule-based safe optimization
+                () => this.ruleBasedOptimization(prompt),
+                
+                // Strategy 3: AI-powered policy optimization
+                () => this.optimizePromptForPolicy(prompt),
+                
+                // Strategy 4: Ultra-safe fallback
+                () => ({
+                    original: prompt,
+                    optimized: `abstract artistic concept inspired by: ${this.sanitizePrompt(prompt).substring(0, 50)}, minimalist digital art`,
+                    method: 'ultra_safe_fallback'
+                })
             ];
 
             let lastError = null;
@@ -297,7 +379,7 @@ Return only the improved prompt, no quotes or explanations.
                     const promptResult = await strategies[i]();
                     const finalPrompt = promptResult.optimized;
                     
-                    logger.info(`Trying strategy ${i + 1}: ${promptResult.method}`);
+                    logger.info(`Trying strategy ${i + 1}: ${promptResult.method} - "${finalPrompt}"`);
                     
                     // Try each model in order
                     for (const model of this.imageModels) {
@@ -313,7 +395,8 @@ Return only the improved prompt, no quotes or explanations.
                                     originalPrompt: prompt,
                                     promptWasOptimized: promptResult.original !== promptResult.optimized,
                                     optimizationMethod: promptResult.method,
-                                    modelUsed: model
+                                    modelUsed: model,
+                                    strategyUsed: i + 1
                                 };
                             }
                         } catch (modelError) {
@@ -323,7 +406,9 @@ Return only the improved prompt, no quotes or explanations.
                             // If it's a content policy error, try next strategy immediately
                             if (modelError.message.includes('content policy') || 
                                 modelError.message.includes('safety') ||
-                                modelError.message.includes('blocked')) {
+                                modelError.message.includes('blocked') ||
+                                modelError.message.includes('violate our policies')) {
+                                logger.info('Content policy violation detected, trying next strategy');
                                 break; // Break model loop, try next strategy
                             }
                         }
@@ -334,23 +419,25 @@ Return only the improved prompt, no quotes or explanations.
                 }
             }
 
-            // If all strategies failed, throw the last error
-            throw lastError || new Error('All generation strategies failed');
+            // If all strategies failed, provide helpful error message
+            throw new Error('Unable to generate image that complies with content policies. Try using more abstract, artistic language focused on objects, landscapes, or art styles rather than realistic human descriptions.');
 
         } catch (error) {
             logger.error(`Error generating image: ${error.message}`);
             
             if (error.message && error.message.includes('quota')) {
                 throw new Error('Rate limit exceeded. Please try again later.');
-            } else if (error.message && (error.message.includes('content policy') || error.message.includes('safety'))) {
-                throw new Error('Content policy violation. Please try rephrasing your request with simpler, more neutral language.');
+            } else if (error.message && (error.message.includes('content policy') || 
+                      error.message.includes('safety') || 
+                      error.message.includes('violate our policies'))) {
+                throw new Error('Content policy violation. Try describing your image using artistic terms like "digital artwork", "illustration", or "artistic rendering" instead of realistic descriptions.');
             }
             
             throw error;
         }
     }
 
-    // IMPROVED: Generate with specific model and better safety settings
+    // Enhanced model generation with better parameter tuning
     async generateWithModel(prompt, modelName, options = {}) {
         try {
             await this.testAuth();
@@ -359,7 +446,7 @@ Return only the improved prompt, no quotes or explanations.
             
             const url = `https://${this.location}-aiplatform.googleapis.com/v1/projects/${this.projectId}/locations/${this.location}/publishers/google/models/${modelName}:predict`;
             
-            // IMPROVED: More permissive safety settings
+            // Enhanced request body with better safety configuration
             const requestBody = {
                 instances: [
                     {
@@ -369,14 +456,18 @@ Return only the improved prompt, no quotes or explanations.
                 parameters: {
                     sampleCount: 1,
                     aspectRatio: options.aspectRatio || "1:1",
-                    // More permissive safety settings
-                    safetyFilterLevel: "block_few", // Less restrictive than default
+                    // Most permissive safety settings
+                    safetyFilterLevel: "block_few", // Most permissive option
                     personGeneration: "allow_adult", // Allow adult person generation
-                    // Remove the restrictive safetySetting we had before
+                    // Add guidance scale for better prompt adherence
+                    guidanceScale: 7, // Lower values = more creative freedom
+                    // Seed for reproducibility if needed
+                    ...(options.seed && { seed: options.seed })
                 }
             };
 
             logger.info(`Making request to ${modelName}:`, url);
+            logger.info(`Request parameters:`, JSON.stringify(requestBody.parameters, null, 2));
 
             const response = await fetch(url, {
                 method: 'POST',
@@ -394,10 +485,14 @@ Return only the improved prompt, no quotes or explanations.
                 logger.error(`${modelName} error response:`, responseText);
                 
                 if (response.status === 400) {
-                    if (responseText.includes('content policy') || 
-                        responseText.includes('safety') || 
-                        responseText.includes('blocked')) {
-                        throw new Error('Content policy violation');
+                    const errorData = JSON.parse(responseText);
+                    if (errorData.error && errorData.error.message) {
+                        if (errorData.error.message.includes('violate our policies') ||
+                            errorData.error.message.includes('content policy') ||
+                            errorData.error.message.includes('safety') ||
+                            errorData.error.message.includes('blocked')) {
+                            throw new Error('Content policy violation');
+                        }
                     }
                 }
                 
