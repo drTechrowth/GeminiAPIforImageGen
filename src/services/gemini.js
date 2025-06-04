@@ -268,26 +268,27 @@ Return only the transformed prompt, no explanations or quotes.
         let transformed = originalPrompt.toLowerCase();
 
         // Remove age references and replace with product focus
-        const ageReplacements = {
+        const ageReplacements = [
             // Age patterns
-            /\b\d+[\s-]?(?:year|yr)[\s-]?old\b/gi: '',
-            /\byears?\s+old\b/gi: '',
+            { pattern: /\b\d+[\s-]?(?:year|yr)[\s-]?old\b/gi, replacement: '' },
+            { pattern: /\byears?\s+old\b/gi, replacement: '' },
             
             // People to objects
-            /\b(?:child|children|kid|kids|boy|girl|baby|babies|infant|toddler)\b/gi: 'product',
-            /\b(?:person|people|human|individual|model)\b/gi: 'item',
+            { pattern: /\b(?:child|children|kid|kids|boy|girl|baby|babies|infant|toddler)\b/gi, replacement: 'product' },
+            { pattern: /\b(?:person|people|human|individual|model)\b/gi, replacement: 'item' },
             
             // Actions to states
-            /\b(?:drinking|eating|consuming)\b/gi: 'featuring',
-            /\b(?:holding|grasping|clutching)\b/gi: 'displaying',
+            { pattern: /\b(?:drinking|eating|consuming)\b/gi, replacement: 'featuring' },
+            { pattern: /\b(?:holding|grasping|clutching)\b/gi, replacement: 'displaying' },
             
             // Contexts to artistic styles
-            /\bphotoshoot\b/gi: 'product photography',
-            /\bmodeling\b/gi: 'artistic arrangement',
-            /\bpose\b/gi: 'composition'
-        };
+            { pattern: /\bphotoshoot\b/gi, replacement: 'product photography' },
+            { pattern: /\bmodeling\b/gi, replacement: 'artistic arrangement' },
+            { pattern: /\bpose\b/gi, replacement: 'composition' }
+        ];
 
-        for (const [pattern, replacement] of Object.entries(ageReplacements)) {
+        // Apply all replacements
+        for (const { pattern, replacement } of ageReplacements) {
             transformed = transformed.replace(pattern, replacement);
         }
 
