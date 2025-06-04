@@ -232,28 +232,30 @@ class GeminiService {
             try {
                 await this.testAuth();
                 logger.info('Authentication test passed');
-                
-                // Skip permission validation since it requires googleapis
-                // The Vertex AI client will handle permission errors appropriately
                 logger.info('Skipping detailed permission validation, proceeding with image generation');
                 
             } catch (authError) {
                 logger.error('Authentication test failed:', authError.message);
-                throw authError; // Re-throw the specific error
+                throw authError;
             }
 
             logger.info('Sending request to generate image...');
 
             // Try using the REST API approach first
-            const accessToken = await this.getAccessToken();
-            const response = await this.generateImageWithRestAPI(prompt, accessToken);
-            
-            if (response && response.base64) {
-                logger.info(`Successfully generated image for user ${userId}`);
-                return response;
+            try {
+                const accessToken = await this.getAccessToken();
+                const response = await this.generateImageWithRestAPI(prompt, accessToken);
+                
+                if (response && response.base64) {
+                    logger.info(`Successfully generated image for user ${userId} using REST API`);
+                    return response;
+                }
+            } catch (restError) {
+                logger.warn(`REST API failed: ${restError.message}, trying fallback method`);
             }
 
             // Fallback to client library approach
+            logger.info('Attempting fallback to client library approach...');
             return await this.generateImageWithClient(prompt, userId);
 
         } catch (error) {
@@ -272,19 +274,10 @@ class GeminiService {
             } else if (error.code === 'ENAMETOOLONG') {
                 logger.error('Path too long error - likely credential configuration issue:', error);
                 throw new Error('Configuration error. Please verify credential setup.');
+            } else if (error.message && (error.message.includes('content policy') || error.message.includes('safety'))) {
+                throw new Error('Content policy violation. Please avoid prompts mentioning real people, celebrities, or inappropriate content.');
             }
             
-            throw error; // Re-throw the original error with its message
-        }
-    }
-
-    async getAccessToken() {
-        try {
-            const client = await this.auth.getClient();
-            const accessTokenResponse = await client.getAccessToken();
-            return accessTokenResponse.token;
-        } catch (error) {
-            logger.error('Failed to get access token:', error.message);
             throw error;
         }
     }
@@ -319,12 +312,25 @@ class GeminiService {
 
             if (!response.ok) {
                 const errorText = await response.text();
-                logger.error('REST API error:', errorText);
+                logger.error('REST API error response:', errorText);
+                
+                // Check for specific error types
+                if (response.status === 400 && errorText.includes('content policy')) {
+                    throw new Error('Content policy violation. Please avoid prompts mentioning real people, celebrities, or inappropriate content.');
+                }
+                
                 throw new Error(`REST API error: ${response.status} ${errorText}`);
             }
 
             const result = await response.json();
             logger.info('REST API response received');
+            
+            // Log the response structure for debugging (without sensitive data)
+            logger.debug('Response structure:', {
+                hasPredictions: !!result.predictions,
+                predictionsLength: result.predictions ? result.predictions.length : 0,
+                firstPredictionKeys: result.predictions && result.predictions[0] ? Object.keys(result.predictions[0]) : []
+            });
 
             if (result.predictions && result.predictions[0] && result.predictions[0].bytesBase64Encoded) {
                 return {
@@ -333,10 +339,68 @@ class GeminiService {
                 };
             }
 
+            // If no image data but response was successful, it might be a content policy issue
+            if (result.predictions && result.predictions.length === 0) {
+                throw new Error('Content policy violation. Please avoid prompts mentioning real people, celebrities, or inappropriate content.');
+            }
+
             throw new Error('No image data in REST API response');
 
         } catch (error) {
             logger.error('REST API generation failed:', error.message);
+            throw error;
+        }
+    }
+
+    async validatePrompt(prompt) {
+        if (!prompt || typeof prompt !== 'string') {
+            throw new Error('Prompt is required and must be a string');
+        }
+
+        if (prompt.length > 1000) {
+            throw new Error('Prompt must be less than 1000 characters');
+        }
+
+        // Check for potentially harmful content
+        const harmfulPatterns = [
+            /explicit|nsfw|nude|naked|sex/i,
+            /violence|blood|gore|death/i,
+            /hate|discrimination|racist/i
+        ];
+
+        // Check for celebrity/public figure names (common ones)
+        const celebrityPatterns = [
+            /sachin tendulkar|sachin|tendulkar/i,
+            /virat kohli|virat|kohli/i,
+            /shah rukh khan|shahrukh/i,
+            /amitabh bachchan|amitabh/i,
+            /narendra modi|modi/i,
+            /elon musk|bill gates|jeff bezos/i,
+            // Add more as needed
+        ];
+
+        for (const pattern of harmfulPatterns) {
+            if (pattern.test(prompt)) {
+                throw new Error('Prompt contains inappropriate content');
+            }
+        }
+
+        for (const pattern of celebrityPatterns) {
+            if (pattern.test(prompt)) {
+                throw new Error('Content policy violation. Please avoid prompts mentioning real people, celebrities, or public figures.');
+            }
+        }
+
+        return true;
+    }
+
+    async getAccessToken() {
+        try {
+            const client = await this.auth.getClient();
+            const accessTokenResponse = await client.getAccessToken();
+            return accessTokenResponse.token;
+        } catch (error) {
+            logger.error('Failed to get access token:', error.message);
             throw error;
         }
     }
@@ -399,31 +463,6 @@ class GeminiService {
             logger.error('Client library generation failed:', error.message);
             throw error;
         }
-    }
-
-    async validatePrompt(prompt) {
-        if (!prompt || typeof prompt !== 'string') {
-            throw new Error('Prompt is required and must be a string');
-        }
-
-        if (prompt.length > 1000) {
-            throw new Error('Prompt must be less than 1000 characters');
-        }
-
-        // Check for potentially harmful content
-        const harmfulPatterns = [
-            /explicit|nsfw|nude|naked|sex/i,
-            /violence|blood|gore|death/i,
-            /hate|discrimination|racist/i
-        ];
-
-        for (const pattern of harmfulPatterns) {
-            if (pattern.test(prompt)) {
-                throw new Error('Prompt contains inappropriate content');
-            }
-        }
-
-        return true;
     }
 
     // Cleanup method to remove temporary credentials file
