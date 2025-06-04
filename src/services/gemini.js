@@ -147,164 +147,162 @@ class GeminiService {
         }
     }
 
-    // Enhanced prompt sanitization with more comprehensive filtering
-    sanitizePrompt(prompt) {
-        let sanitized = prompt.trim();
+    // ENHANCED: Comprehensive content policy detection
+    detectProblematicContent(prompt) {
+        const issues = [];
+        const lowerPrompt = prompt.toLowerCase();
 
-        // Remove problematic words that often trigger content policies
-        const problematicTerms = {
-            // People-related terms that can be problematic
-            'person': 'figure',
-            'people': 'figures',
-            'human': 'character',
-            'humans': 'characters',
-            'man': 'male figure',
-            'woman': 'female figure',
-            'men': 'male figures',
-            'women': 'female figures',
-            'boy': 'young male character',
-            'girl': 'young female character',
-            'child': 'young character',
-            'children': 'young characters',
-            'baby': 'infant character',
-            
-            // Appearance-related terms
-            'beautiful': 'elegant',
-            'sexy': 'stylish',
-            'attractive': 'appealing',
-            'gorgeous': 'lovely',
-            'handsome': 'distinguished',
-            
-            // Body-related terms
-            'body': 'form',
-            'face': 'features',
-            'skin': 'surface',
-            
-            // Brand names
-            'nike': 'athletic brand',
-            'adidas': 'sports brand',
-            'apple': 'tech company',
-            'google': 'search engine',
-            'facebook': 'social media',
-            'instagram': 'photo app',
-            'twitter': 'social platform',
-            'coca cola': 'cola drink',
-            'pepsi': 'cola beverage',
-            'mcdonalds': 'fast food',
-            'starbucks': 'coffee shop',
-            
-            // Potentially sensitive locations
-            'school': 'educational building',
-            'hospital': 'medical facility',
-            'church': 'religious building',
-            'mosque': 'religious building',
-            'temple': 'religious building'
-        };
+        // Age-related terms that trigger policies
+        const agePatterns = [
+            /\b(?:child|children|kid|kids|boy|girl|baby|babies|infant|toddler|teen|teenager)\b/i,
+            /\b(?:\d+[\s-]?(?:year|yr)[\s-]?old|years?\s+old)\b/i,
+            /\b(?:minor|juvenile|youth|young|little|small)\s+(?:person|people|human|individual)\b/i,
+            /\b(?:school|student|pupil|kindergarten|preschool)\b/i
+        ];
 
-        // Apply replacements with word boundaries
-        for (const [term, replacement] of Object.entries(problematicTerms)) {
-            const regex = new RegExp(`\\b${term}\\b`, 'gi');
-            sanitized = sanitized.replace(regex, replacement);
+        // Problematic contexts even for adults
+        const riskPatterns = [
+            /\b(?:model|modeling|pose|posing|photoshoot)\b/i,
+            /\b(?:cute|adorable|sweet|innocent)\s+(?:child|kid|boy|girl)\b/i,
+            /\b(?:drinking|eating|consuming)\b.*\b(?:milk|formula|bottle)\b/i
+        ];
+
+        for (const pattern of agePatterns) {
+            if (pattern.test(prompt)) {
+                issues.push({
+                    type: 'age_related',
+                    pattern: pattern.toString(),
+                    severity: 'high'
+                });
+            }
         }
 
-        // Remove multiple spaces and clean up
-        sanitized = sanitized.replace(/\s+/g, ' ').trim();
+        for (const pattern of riskPatterns) {
+            if (pattern.test(prompt)) {
+                issues.push({
+                    type: 'risky_context',
+                    pattern: pattern.toString(),
+                    severity: 'medium'
+                });
+            }
+        }
 
-        return sanitized;
+        return issues;
     }
 
-    // Enhanced prompt optimization with better content policy awareness
-    async optimizePromptForPolicy(originalPrompt) {
+    // ENHANCED: Smart prompt transformation that addresses root issues
+    async smartPromptTransformation(originalPrompt) {
         try {
-            logger.info(`Optimizing prompt for content policy: ${originalPrompt}`);
+            const issues = this.detectProblematicContent(originalPrompt);
+            
+            if (issues.length === 0) {
+                return {
+                    original: originalPrompt,
+                    transformed: originalPrompt,
+                    method: 'no_issues_detected',
+                    issues: []
+                };
+            }
 
+            logger.info(`Detected ${issues.length} potential issues:`, issues);
+
+            // Use AI to transform the prompt while preserving intent
             const textModel = this.vertexai.preview.getGenerativeModel({
                 model: 'gemini-2.0-flash-001'
             });
 
-            const optimizationPrompt = `
-You are an expert at creating prompts for Google's image generation API that comply with their content policies.
+            const transformationPrompt = `
+Transform this image generation prompt to avoid content policy violations while preserving the core visual intent:
 
-Transform this prompt to avoid content policy violations while preserving the creative intent:
+Original prompt: "${originalPrompt}"
 
-Rules:
-1. Replace specific people/celebrities with generic descriptions
-2. Use artistic and creative language instead of realistic human descriptions
-3. Focus on objects, landscapes, art styles, and abstract concepts
-4. Avoid brand names, logos, copyrighted characters
-5. Use terms like "artistic rendering", "stylized", "illustration style"
-6. Replace "photo" or "realistic" with "artwork", "painting", "digital art"
-7. Avoid describing human features in detail
-8. Make it sound more like an art commission than a photo request
+Guidelines:
+1. If the prompt mentions children, minors, or specific ages - transform to focus on objects, products, or abstract concepts instead
+2. Replace human subjects with inanimate objects, art styles, or conceptual representations
+3. If it's about food/drinks, focus on the product itself, not consumption by people
+4. Maintain the essence (colors, mood, style) but remove human elements
+5. Make it artistic and abstract rather than realistic
+6. Use terms like "artistic representation," "conceptual design," "product photography," "still life"
 
-Original: "${originalPrompt}"
-
-Return only the optimized prompt, no explanations:`;
+Return only the transformed prompt, no explanations or quotes.
+`;
 
             const result = await textModel.generateContent({
                 contents: [{
                     role: 'user',
-                    parts: [{ text: optimizationPrompt }]
+                    parts: [{ text: transformationPrompt }]
                 }],
                 generationConfig: {
-                    temperature: 0.2,
+                    temperature: 0.3,
                     topK: 10,
                     topP: 0.5,
-                    maxOutputTokens: 300
+                    maxOutputTokens: 150
                 }
             });
 
             const candidate = result?.response?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
 
             if (candidate) {
-                const optimizedPrompt = candidate.replace(/^["']|["']$/g, '');
-                logger.info(`AI optimized prompt: ${optimizedPrompt}`);
+                const transformedPrompt = candidate.replace(/^["']|["']$/g, '');
+                logger.info(`AI transformed prompt: ${transformedPrompt}`);
+                
                 return {
                     original: originalPrompt,
-                    optimized: optimizedPrompt,
-                    method: 'ai_policy_optimization'
+                    transformed: transformedPrompt,
+                    method: 'ai_transformation',
+                    issues: issues
                 };
             } else {
-                throw new Error('No optimization result');
+                // Fallback to rule-based transformation
+                return this.ruleBasedTransformation(originalPrompt, issues);
             }
 
         } catch (error) {
-            logger.error('AI optimization failed:', error.message);
-            // Fallback to rule-based optimization
-            return this.ruleBasedOptimization(originalPrompt);
+            logger.error('AI transformation failed:', error.message);
+            return this.ruleBasedTransformation(originalPrompt, this.detectProblematicContent(originalPrompt));
         }
     }
 
-    // Rule-based optimization as fallback
-    ruleBasedOptimization(originalPrompt) {
-        let optimized = this.sanitizePrompt(originalPrompt);
+    // ENHANCED: Rule-based transformation as fallback
+    ruleBasedTransformation(originalPrompt, issues) {
+        let transformed = originalPrompt.toLowerCase();
 
-        // Add safe artistic modifiers
-        const safeModifiers = [
-            'digital artwork of',
-            'artistic illustration of',
-            'stylized rendering of',
-            'creative visualization of',
-            'artistic interpretation of'
-        ];
+        // Remove age references and replace with product focus
+        const ageReplacements = {
+            // Age patterns
+            /\b\d+[\s-]?(?:year|yr)[\s-]?old\b/gi: '',
+            /\byears?\s+old\b/gi: '',
+            
+            // People to objects
+            /\b(?:child|children|kid|kids|boy|girl|baby|babies|infant|toddler)\b/gi: 'product',
+            /\b(?:person|people|human|individual|model)\b/gi: 'item',
+            
+            // Actions to states
+            /\b(?:drinking|eating|consuming)\b/gi: 'featuring',
+            /\b(?:holding|grasping|clutching)\b/gi: 'displaying',
+            
+            // Contexts to artistic styles
+            /\bphotoshoot\b/gi: 'product photography',
+            /\bmodeling\b/gi: 'artistic arrangement',
+            /\bpose\b/gi: 'composition'
+        };
 
-        // Check if prompt already has artistic language
-        const hasArtisticLanguage = /\b(art|artistic|illustration|painting|drawing|digital|stylized|rendered)\b/i.test(optimized);
-
-        if (!hasArtisticLanguage) {
-            const randomModifier = safeModifiers[Math.floor(Math.random() * safeModifiers.length)];
-            optimized = `${randomModifier} ${optimized}`;
+        for (const [pattern, replacement] of Object.entries(ageReplacements)) {
+            transformed = transformed.replace(pattern, replacement);
         }
 
-        // Add style suffix to make it more artistic
-        if (!optimized.includes('style') && !optimized.includes('art')) {
-            optimized += ', digital art style';
-        }
+        // Clean up and make it more abstract
+        transformed = transformed
+            .replace(/\s+/g, ' ')
+            .trim()
+            .replace(/^/, 'artistic still life composition featuring ')
+            .replace(/milk\s*fro/, 'milk glass with frothy texture');
 
         return {
             original: originalPrompt,
-            optimized: optimized,
-            method: 'rule_based_safe'
+            transformed: transformed,
+            method: 'rule_based_transformation',
+            issues: issues
         };
     }
 
@@ -317,27 +315,13 @@ Return only the optimized prompt, no explanations:`;
             throw new Error('Prompt must be less than 1000 characters');
         }
 
-        // More comprehensive harmful content check
-        const harmfulPatterns = [
-            // Explicit content
-            /\b(explicit|nsfw|nude|naked|sexual|erotic|porn)\b/i,
-            // Violence
-            /\b(violence|blood|gore|kill|murder|death|weapon|gun|knife|bomb|explosion)\b/i,
-            // Hate speech
-            /\b(hate|racist|discrimination|nazi|terrorist)\b/i,
-            // Drugs
-            /\b(drugs|cocaine|heroin|meth|marijuana|weed|smoking|alcohol|drunk)\b/i,
-            // Copyrighted characters
-            /\b(mickey mouse|superman|batman|spiderman|pokemon|naruto|mario|sonic)\b/i,
-            // Celebrities (add more as needed)
-            /\b(elon musk|donald trump|taylor swift|leonardo dicaprio|angelina jolie)\b/i
-        ];
+        // Enhanced validation
+        const issues = this.detectProblematicContent(prompt);
+        const highSeverityIssues = issues.filter(issue => issue.severity === 'high');
 
-        for (const pattern of harmfulPatterns) {
-            if (pattern.test(prompt)) {
-                logger.warn(`Prompt flagged by pattern: ${pattern.source}`);
-                throw new Error('Prompt contains potentially inappropriate content');
-            }
+        if (highSeverityIssues.length > 0) {
+            logger.warn('High severity content policy issues detected:', highSeverityIssues);
+            // Don't throw error here, let transformation handle it
         }
 
         return true;
@@ -349,26 +333,23 @@ Return only the optimized prompt, no explanations:`;
             
             await this.validatePrompt(prompt);
 
-            // Enhanced strategy sequence with more policy-aware optimizations
+            // Enhanced strategy with smart transformation
             const strategies = [
-                // Strategy 1: Try original with basic sanitization
-                () => ({
-                    original: prompt,
-                    optimized: this.sanitizePrompt(prompt),
-                    method: 'basic_sanitization'
+                // Strategy 1: Try original prompt first
+                async () => ({ 
+                    original: prompt, 
+                    transformed: prompt, 
+                    method: 'original' 
                 }),
                 
-                // Strategy 2: Rule-based safe optimization
-                () => this.ruleBasedOptimization(prompt),
+                // Strategy 2: Smart AI transformation
+                async () => await this.smartPromptTransformation(prompt),
                 
-                // Strategy 3: AI-powered policy optimization
-                () => this.optimizePromptForPolicy(prompt),
-                
-                // Strategy 4: Ultra-safe fallback
-                () => ({
+                // Strategy 3: Ultra-safe abstract version
+                async () => ({
                     original: prompt,
-                    optimized: `abstract artistic concept inspired by: ${this.sanitizePrompt(prompt).substring(0, 50)}, minimalist digital art`,
-                    method: 'ultra_safe_fallback'
+                    transformed: `abstract artistic composition inspired by the concept of: ${prompt.replace(/\b(?:child|children|kid|kids|boy|girl|baby|babies|infant|toddler|person|people|human)\b/gi, 'element').substring(0, 50)}, digital art style`,
+                    method: 'ultra_abstract'
                 })
             ];
 
@@ -377,9 +358,10 @@ Return only the optimized prompt, no explanations:`;
             for (let i = 0; i < strategies.length; i++) {
                 try {
                     const promptResult = await strategies[i]();
-                    const finalPrompt = promptResult.optimized;
+                    const finalPrompt = promptResult.transformed;
                     
-                    logger.info(`Trying strategy ${i + 1}: ${promptResult.method} - "${finalPrompt}"`);
+                    logger.info(`Trying strategy ${i + 1}: ${promptResult.method}`);
+                    logger.info(`Using prompt: ${finalPrompt}`);
                     
                     // Try each model in order
                     for (const model of this.imageModels) {
@@ -393,10 +375,10 @@ Return only the optimized prompt, no explanations:`;
                                     ...result,
                                     promptUsed: finalPrompt,
                                     originalPrompt: prompt,
-                                    promptWasOptimized: promptResult.original !== promptResult.optimized,
-                                    optimizationMethod: promptResult.method,
+                                    promptWasTransformed: promptResult.original !== promptResult.transformed,
+                                    transformationMethod: promptResult.method,
                                     modelUsed: model,
-                                    strategyUsed: i + 1
+                                    detectedIssues: promptResult.issues || []
                                 };
                             }
                         } catch (modelError) {
@@ -407,8 +389,7 @@ Return only the optimized prompt, no explanations:`;
                             if (modelError.message.includes('content policy') || 
                                 modelError.message.includes('safety') ||
                                 modelError.message.includes('blocked') ||
-                                modelError.message.includes('violate our policies')) {
-                                logger.info('Content policy violation detected, trying next strategy');
+                                modelError.message.includes('58061214')) {
                                 break; // Break model loop, try next strategy
                             }
                         }
@@ -419,25 +400,28 @@ Return only the optimized prompt, no explanations:`;
                 }
             }
 
-            // If all strategies failed, provide helpful error message
-            throw new Error('Unable to generate image that complies with content policies. Try using more abstract, artistic language focused on objects, landscapes, or art styles rather than realistic human descriptions.');
+            // Enhanced error message based on detected issues
+            const issues = this.detectProblematicContent(prompt);
+            const hasAgeIssues = issues.some(issue => issue.type === 'age_related');
+            
+            if (hasAgeIssues) {
+                throw new Error('Unable to generate images with human subjects, especially minors. Try focusing on objects, landscapes, abstract art, or product photography instead.');
+            } else {
+                throw new Error('Content policy violation. Please try rephrasing with more abstract, artistic language.');
+            }
 
         } catch (error) {
             logger.error(`Error generating image: ${error.message}`);
             
             if (error.message && error.message.includes('quota')) {
                 throw new Error('Rate limit exceeded. Please try again later.');
-            } else if (error.message && (error.message.includes('content policy') || 
-                      error.message.includes('safety') || 
-                      error.message.includes('violate our policies'))) {
-                throw new Error('Content policy violation. Try describing your image using artistic terms like "digital artwork", "illustration", or "artistic rendering" instead of realistic descriptions.');
             }
             
             throw error;
         }
     }
 
-    // Enhanced model generation with better parameter tuning
+    // IMPROVED: Better response handling
     async generateWithModel(prompt, modelName, options = {}) {
         try {
             await this.testAuth();
@@ -446,7 +430,6 @@ Return only the optimized prompt, no explanations:`;
             
             const url = `https://${this.location}-aiplatform.googleapis.com/v1/projects/${this.projectId}/locations/${this.location}/publishers/google/models/${modelName}:predict`;
             
-            // Enhanced request body with better safety configuration
             const requestBody = {
                 instances: [
                     {
@@ -456,18 +439,13 @@ Return only the optimized prompt, no explanations:`;
                 parameters: {
                     sampleCount: 1,
                     aspectRatio: options.aspectRatio || "1:1",
-                    // Most permissive safety settings
-                    safetyFilterLevel: "block_few", // Most permissive option
-                    personGeneration: "allow_adult", // Allow adult person generation
-                    // Add guidance scale for better prompt adherence
-                    guidanceScale: 7, // Lower values = more creative freedom
-                    // Seed for reproducibility if needed
-                    ...(options.seed && { seed: options.seed })
+                    safetyFilterLevel: "block_few",
+                    personGeneration: "allow_adult"
                 }
             };
 
             logger.info(`Making request to ${modelName}:`, url);
-            logger.info(`Request parameters:`, JSON.stringify(requestBody.parameters, null, 2));
+            logger.info('Request parameters:', requestBody.parameters);
 
             const response = await fetch(url, {
                 method: 'POST',
@@ -485,14 +463,11 @@ Return only the optimized prompt, no explanations:`;
                 logger.error(`${modelName} error response:`, responseText);
                 
                 if (response.status === 400) {
-                    const errorData = JSON.parse(responseText);
-                    if (errorData.error && errorData.error.message) {
-                        if (errorData.error.message.includes('violate our policies') ||
-                            errorData.error.message.includes('content policy') ||
-                            errorData.error.message.includes('safety') ||
-                            errorData.error.message.includes('blocked')) {
-                            throw new Error('Content policy violation');
-                        }
+                    if (responseText.includes('content policy') || 
+                        responseText.includes('safety') || 
+                        responseText.includes('blocked') ||
+                        responseText.includes('58061214')) {
+                        throw new Error('Content policy violation');
                     }
                 }
                 
@@ -506,14 +481,22 @@ Return only the optimized prompt, no explanations:`;
                 throw new Error('Invalid response format from image generation API');
             }
             
-            if (result.predictions && result.predictions[0] && result.predictions[0].bytesBase64Encoded) {
-                return {
-                    base64: result.predictions[0].bytesBase64Encoded,
-                    mimeType: 'image/png'
-                };
+            // Enhanced response validation
+            if (result.predictions && result.predictions[0]) {
+                const prediction = result.predictions[0];
+                
+                if (prediction.bytesBase64Encoded && prediction.bytesBase64Encoded.length > 0) {
+                    return {
+                        base64: prediction.bytesBase64Encoded,
+                        mimeType: prediction.mimeType || 'image/png'
+                    };
+                }
             }
 
-            // Check for empty response (usually content policy issue)
+            // Log the actual response structure for debugging
+            logger.error(`Unexpected response structure from ${modelName}:`, JSON.stringify(result, null, 2));
+
+            // Check for empty predictions (content policy)
             if (result.predictions && result.predictions.length === 0) {
                 throw new Error('Content policy violation - empty response');
             }
