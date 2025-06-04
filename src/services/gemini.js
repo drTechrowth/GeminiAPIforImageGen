@@ -186,7 +186,7 @@ class GeminiService {
             });
 
             const optimizationPrompt = `
-    You are an expert AI prompt engineer specializing in image generation and content safety. Optimize the following prompt using the following directives:
+    You are an expert AI prompt engineer specializing in image generation. Your primary instruction is to optimize prompts for image genearation tools using Gemini's Image gen API. Loosly optimize the following prompt using the following directives:
 
     1. Change specific racial groups to models for that Racial groups.
     2. Replace brand names with generic, descriptive alternatives.
@@ -196,7 +196,7 @@ class GeminiService {
     6. Reinforce advertising intent by incorporating product or lifestyle context.
     7. Ensure the prompt is wholesome, respectful, and family-friendly.
 
-    Now optimize this prompt accordingly:
+    Now optimize this prompt accordingly for use in image generation:
 
     "${originalPrompt}"
 
