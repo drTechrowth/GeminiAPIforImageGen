@@ -221,12 +221,184 @@ class GeminiService {
         }
     }
 
+    // NEW: Smart prompt preprocessing to avoid content policy issues
+    preprocessPrompt(originalPrompt) {
+        try {
+            logger.info(`Preprocessing prompt: ${originalPrompt}`);
+            
+            // First, perform basic validation
+            if (!originalPrompt || typeof originalPrompt !== 'string') {
+                throw new Error('Prompt is required and must be a string');
+            }
+
+            if (originalPrompt.length > 1000) {
+                throw new Error('Prompt must be less than 1000 characters');
+            }
+
+            // Start with the original prompt
+            let processedPrompt = originalPrompt.trim();
+
+            // 1. Replace brand names with generic terms to avoid trademark issues
+            const brandReplacements = {
+                'nutramilk': 'nutritional milk product',
+                'coca cola': 'cola drink',
+                'pepsi': 'cola beverage',
+                'nike': 'athletic wear',
+                'adidas': 'sports brand',
+                'apple': 'tech device',
+                'samsung': 'electronic device',
+                'bmw': 'luxury car',
+                'mercedes': 'premium vehicle'
+            };
+
+            // Apply brand replacements (case insensitive)
+            for (const [brand, replacement] of Object.entries(brandReplacements)) {
+                const regex = new RegExp(brand, 'gi');
+                processedPrompt = processedPrompt.replace(regex, replacement);
+            }
+
+            // 2. Enhance demographic descriptions to be more AI-friendly
+            const demographicEnhancements = {
+                'african family': 'family of African descent',
+                'indian family': 'family of South Asian heritage',
+                'asian family': 'family of Asian heritage',
+                'elderly person': 'mature adult',
+                'kids': 'children',
+                'teenage': 'young adult'
+            };
+
+            for (const [original, enhanced] of Object.entries(demographicEnhancements)) {
+                const regex = new RegExp(original, 'gi');
+                processedPrompt = processedPrompt.replace(regex, enhanced);
+            }
+
+            // 3. Add context and style guidance to make the prompt more specific and AI-friendly
+            const contextualAdditions = [];
+            
+            // Add professional photography context if not present
+            if (!processedPrompt.toLowerCase().includes('photo') && 
+                !processedPrompt.toLowerCase().includes('image') && 
+                !processedPrompt.toLowerCase().includes('picture')) {
+                contextualAdditions.push('professional photograph of');
+            }
+
+            // Add lighting guidance for better results
+            if (!processedPrompt.toLowerCase().includes('lighting') && 
+                !processedPrompt.toLowerCase().includes('light')) {
+                contextualAdditions.push('with natural lighting');
+            }
+
+            // Add quality modifiers
+            const qualityModifiers = ['high quality', 'detailed', 'realistic'];
+            const hasQualityModifier = qualityModifiers.some(modifier => 
+                processedPrompt.toLowerCase().includes(modifier)
+            );
+            
+            if (!hasQualityModifier) {
+                contextualAdditions.push('high quality and detailed');
+            }
+
+            // 4. Construct the final prompt
+            if (contextualAdditions.length > 0) {
+                processedPrompt = `${contextualAdditions.join(', ')} ${processedPrompt}`;
+            }
+
+            // 5. Add style guidance to avoid potential issues
+            const styleGuidance = [
+                'commercial photography style',
+                'clean background',
+                'professional composition'
+            ];
+
+            processedPrompt += `, ${styleGuidance.join(', ')}`;
+
+            // 6. Final safety check - remove any potentially problematic patterns
+            const safetyReplacements = {
+                'nude': 'natural',
+                'naked': 'plain',
+                'sexy': 'attractive',
+                'hot': 'appealing'
+            };
+
+            for (const [unsafe, safe] of Object.entries(safetyReplacements)) {
+                const regex = new RegExp(unsafe, 'gi');
+                processedPrompt = processedPrompt.replace(regex, safe);
+            }
+
+            logger.info(`Preprocessed prompt: ${processedPrompt}`);
+            
+            return {
+                original: originalPrompt,
+                processed: processedPrompt,
+                changes: processedPrompt !== originalPrompt
+            };
+
+        } catch (error) {
+            logger.error('Error preprocessing prompt:', error.message);
+            throw error;
+        }
+    }
+
+    // Updated validation that's more precise
+    async validatePrompt(prompt) {
+        if (!prompt || typeof prompt !== 'string') {
+            throw new Error('Prompt is required and must be a string');
+        }
+
+        if (prompt.length > 1000) {
+            throw new Error('Prompt must be less than 1000 characters');
+        }
+
+        // Check for genuinely harmful content (more precise patterns)
+        const harmfulPatterns = [
+            /\bexplicit\b|\bnsfw\b|\bnude\b|\bnaked\b|\bsex\b/i,
+            /\bviolence\b|\bblood\b|\bgore\b|\bdeath\b|\bkill\b/i,
+            /\bhate\b|\bdiscrimination\b|\bracist\b/i
+        ];
+
+        // More precise celebrity detection (full names or very specific terms)
+        const celebrityPatterns = [
+            // Full names only, not partial matches
+            /\bsachin tendulkar\b|\bvirat kohli\b|\bms dhoni\b|\brohit sharma\b/i,
+            /\bshah rukh khan\b|\bamitabh bachchan\b|\bsalman khan\b|\baamir khan\b/i,
+            /\bakshay kumar\b|\bdeepika padukone\b|\bpriyanka chopra\b/i,
+            /\bnarendra modi\b|\brahul gandhi\b|\barvind kejriwal\b/i,
+            /\belon musk\b|\bbill gates\b|\bjeff bezos\b/i,
+            /\bdonald trump\b|\bjoe biden\b/i,
+            /\bleonardo dicaprio\b|\bbrad pitt\b|\bangelina jolie\b/i,
+            /\btaylor swift\b|\bbeyonce\b|\brihanna\b/i,
+            /\bcristiano ronaldo\b|\blionel messi\b/i
+        ];
+
+        for (const pattern of harmfulPatterns) {
+            if (pattern.test(prompt)) {
+                throw new Error('Prompt contains inappropriate content');
+            }
+        }
+
+        for (const pattern of celebrityPatterns) {
+            if (pattern.test(prompt)) {
+                throw new Error('Content policy violation. Please avoid prompts mentioning specific celebrities or public figures by name.');
+            }
+        }
+
+        return true;
+    }
+
     async generateImage(prompt, userId) {
         try {
-            logger.info(`Generating image for user ${userId} with prompt: ${prompt}`);
+            logger.info(`Generating image for user ${userId} with original prompt: ${prompt}`);
             
-            // First validate the prompt - this will throw an error if invalid
-            await this.validatePrompt(prompt);
+            // NEW: Preprocess the prompt to avoid common issues
+            const promptResult = this.preprocessPrompt(prompt);
+            const finalPrompt = promptResult.processed;
+            
+            if (promptResult.changes) {
+                logger.info(`Prompt was enhanced from: "${promptResult.original}" to: "${finalPrompt}"`);
+            }
+
+            // Validate the processed prompt
+            await this.validatePrompt(finalPrompt);
 
             // Test authentication before making the request
             try {
@@ -244,11 +416,15 @@ class GeminiService {
             // Try using the REST API approach first
             try {
                 const accessToken = await this.getAccessToken();
-                const response = await this.generateImageWithRestAPI(prompt, accessToken);
+                const response = await this.generateImageWithRestAPI(finalPrompt, accessToken);
                 
                 if (response && response.base64) {
                     logger.info(`Successfully generated image for user ${userId} using REST API`);
-                    return response;
+                    return {
+                        ...response,
+                        promptUsed: finalPrompt,
+                        promptWasModified: promptResult.changes
+                    };
                 }
             } catch (restError) {
                 logger.warn(`REST API failed: ${restError.message}, trying fallback method`);
@@ -261,7 +437,13 @@ class GeminiService {
 
             // Fallback to client library approach
             logger.info('Attempting fallback to client library approach...');
-            return await this.generateImageWithClient(prompt, userId);
+            const result = await this.generateImageWithClient(finalPrompt, userId);
+            
+            return {
+                ...result,
+                promptUsed: finalPrompt,
+                promptWasModified: promptResult.changes
+            };
 
         } catch (error) {
             logger.error(`Error generating image: ${error.message}`);
@@ -280,7 +462,7 @@ class GeminiService {
                 logger.error('Path too long error - likely credential configuration issue:', error);
                 throw new Error('Configuration error. Please verify credential setup.');
             } else if (error.message && (error.message.includes('content policy') || error.message.includes('safety'))) {
-                throw new Error('Content policy violation. Please avoid prompts mentioning real people, celebrities, or inappropriate content.');
+                throw new Error('Content policy violation. The image request could not be processed due to safety guidelines.');
             } else if (error.message && error.message.includes('Prompt contains inappropriate content')) {
                 // This is from our own validation
                 throw error;
@@ -324,7 +506,7 @@ class GeminiService {
                 
                 // Check for specific error types
                 if (response.status === 400 && errorText.includes('content policy')) {
-                    throw new Error('Content policy violation. Please avoid prompts mentioning real people, celebrities, or inappropriate content.');
+                    throw new Error('Content policy violation. The image request could not be processed due to safety guidelines.');
                 }
                 
                 throw new Error(`REST API error: ${response.status} ${errorText}`);
@@ -350,7 +532,7 @@ class GeminiService {
             // If no image data but response was successful, it might be a content policy issue
             if (result.predictions && result.predictions.length === 0) {
                 logger.warn('Empty predictions array - likely content policy violation');
-                throw new Error('Content policy violation. Please avoid prompts mentioning real people, celebrities, or inappropriate content.');
+                throw new Error('Content policy violation. The image request could not be processed due to safety guidelines.');
             }
 
             // Log the full response structure for debugging
@@ -361,66 +543,6 @@ class GeminiService {
             logger.error('REST API generation failed:', error.message);
             throw error;
         }
-    }
-
-    async validatePrompt(prompt) {
-        if (!prompt || typeof prompt !== 'string') {
-            throw new Error('Prompt is required and must be a string');
-        }
-
-        if (prompt.length > 1000) {
-            throw new Error('Prompt must be less than 1000 characters');
-        }
-
-        // Check for potentially harmful content
-        const harmfulPatterns = [
-            /explicit|nsfw|nude|naked|sex/i,
-            /violence|blood|gore|death/i,
-            /hate|discrimination|racist/i
-        ];
-
-        // Enhanced celebrity/public figure detection
-        const celebrityPatterns = [
-            // Cricket players
-            /sachin\s*tendulkar|sachin|tendulkar/i,
-            /virat\s*kohli|virat|kohli/i,
-            /ms\s*dhoni|dhoni/i,
-            /rohit\s*sharma|rohit/i,
-            // Bollywood actors
-            /shah\s*rukh\s*khan|shahrukh|srk/i,
-            /amitabh\s*bachchan|amitabh/i,
-            /salman\s*khan|salman/i,
-            /aamir\s*khan|aamir/i,
-            /akshay\s*kumar|akshay/i,
-            /deepika\s*padukone|deepika/i,
-            /priyanka\s*chopra|priyanka/i,
-            // Politicians
-            /narendra\s*modi|modi/i,
-            /rahul\s*gandhi|rahul/i,
-            /arvind\s*kejriwal|kejriwal/i,
-            // International celebrities
-            /elon\s*musk|bill\s*gates|jeff\s*bezos/i,
-            /donald\s*trump|joe\s*biden/i,
-            /leonardo\s*dicaprio|brad\s*pitt|angelina\s*jolie/i,
-            /taylor\s*swift|beyonce|rihanna/i,
-            /cristiano\s*ronaldo|lionel\s*messi/i,
-            // Generic terms for famous people
-            /celebrity|famous\s*person|movie\s*star|bollywood\s*actor|cricket\s*player/i
-        ];
-
-        for (const pattern of harmfulPatterns) {
-            if (pattern.test(prompt)) {
-                throw new Error('Prompt contains inappropriate content');
-            }
-        }
-
-        for (const pattern of celebrityPatterns) {
-            if (pattern.test(prompt)) {
-                throw new Error('Content policy violation. Please avoid prompts mentioning real people, celebrities, or public figures.');
-            }
-        }
-
-        return true;
     }
 
     async getAccessToken() {
@@ -493,7 +615,7 @@ class GeminiService {
             
             // Check if it's a content policy error
             if (error.message && (error.message.includes('content policy') || error.message.includes('safety'))) {
-                throw new Error('Content policy violation. Please avoid prompts mentioning real people, celebrities, or inappropriate content.');
+                throw new Error('Content policy violation. The image request could not be processed due to safety guidelines.');
             }
             
             throw error;
