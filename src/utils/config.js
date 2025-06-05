@@ -32,6 +32,30 @@ const config = {
         // Text model for prompt transformation
         textModel: 'gemini-2.0-flash-001',
         
+        // Safety settings configuration
+        safetySettings: {
+            // Available safety filter levels (use what's available to your project)
+            filterLevels: [
+                'block_few',      // Most permissive (try this first)
+                'block_some',     // Medium filtering
+                'block_most'      // Most restrictive
+            ],
+            
+            // Fallback parameters for different access levels
+            standardParams: {
+                sampleCount: 1,
+                safetyFilterLevel: 'block_few',
+                includeRaiInfo: false
+            },
+            
+            // Conservative parameters for restricted accounts
+            restrictedParams: {
+                sampleCount: 1,
+                safetyFilterLevel: 'block_some',
+                includeRaiInfo: true
+            }
+        },
+        
         // Enhanced prompt transformation configuration
         promptTransformation: {
             // Enhanced AI-powered transformation prompt for cultural sensitivity
@@ -89,6 +113,13 @@ Return only the transformed prompt, no explanations.`,
                 'quota',
                 'rate limit',
                 'limit exceeded'
+            ],
+            // NEW: Person generation restriction errors
+            personRestriction: [
+                'person generation',
+                'allow (all ages)',
+                'not available to you',
+                'safety settings documentation'
             ]
         },
         
