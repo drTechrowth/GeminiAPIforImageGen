@@ -32,29 +32,47 @@ const config = {
         // Text model for prompt transformation
         textModel: 'gemini-2.0-flash-001',
         
-        // Prompt transformation configuration
+        // Enhanced prompt transformation configuration
         promptTransformation: {
-            // AI-powered transformation prompt
-            prompt: `Transform this image generation prompt to avoid content policy violations while preserving the core visual intent:
+            // Enhanced AI-powered transformation prompt for cultural sensitivity
+            enhancedPrompt: `You are an expert in cultural photography and ethical AI image generation. Transform this prompt to be culturally sensitive and appropriate while preserving authentic human representation:
 
 Original prompt: "{ORIGINAL_PROMPT}"
 
 Guidelines:
-1. If the prompt mentions children, minors, or specific ages - transform to focus on objects, products, or abstract concepts instead
-2. Replace human subjects with inanimate objects, art styles, or conceptual representations
-3. If it's about food/drinks, focus on the product itself, not consumption by people
-4. Maintain the essence (colors, mood, style) but remove human elements
-5. Make it artistic and abstract rather than realistic
-6. Use terms like "artistic representation," "conceptual design," "product photography," "still life"
+1. PRESERVE cultural identity and authenticity - do not remove cultural context
+2. ENHANCE with respectful, dignified language
+3. ADD photographic quality descriptors (natural lighting, authentic setting, etc.)
+4. MAINTAIN the human subject if appropriate - focus on dignity and respect
+5. For children: emphasize natural, wholesome family contexts
+6. Use terms like "authentic cultural portrait," "dignified representation," "natural family moment"
+7. Avoid sanitizing cultural elements - embrace diversity respectfully
 
-Return only the transformed prompt, no explanations or quotes.`,
+Transform to be more culturally appropriate and photographically excellent while keeping the core human story intact.
+
+Return only the enhanced prompt, no explanations.`,
+
+            // Original transformation prompt for truly problematic content
+            prompt: `Transform this image generation prompt to avoid content policy violations while preserving cultural authenticity:
+
+Original prompt: "{ORIGINAL_PROMPT}"
+
+Guidelines:
+1. If content is truly inappropriate (sexual, exploitative), create a respectful alternative
+2. For normal cultural or family content, enhance with dignity and respect
+3. Preserve human subjects when appropriate - focus on authentic representation
+4. Use artistic, documentary, or portrait photography terms
+5. Emphasize cultural sensitivity and human dignity
+6. Add quality enhancers: natural lighting, authentic setting, respectful portrayal
+
+Return only the transformed prompt, no explanations.`,
             
             // Generation configuration for transformation
             config: {
-                temperature: 0.3,
-                topK: 10,
-                topP: 0.5,
-                maxOutputTokens: 150
+                temperature: 0.4,
+                topK: 20,
+                topP: 0.8,
+                maxOutputTokens: 200
             }
         },
         
@@ -64,7 +82,8 @@ Return only the transformed prompt, no explanations or quotes.`,
                 'content policy', 
                 'safety', 
                 'blocked', 
-                '58061214'
+                '58061214',
+                'responsible ai'
             ],
             quota: [
                 'quota',
@@ -73,39 +92,43 @@ Return only the transformed prompt, no explanations or quotes.`,
             ]
         },
         
-        // Content detection patterns
+        // Updated content detection patterns - more permissive
         contentDetection: {
-            agePatterns: [
-                /\b(?:child|children|kid|kids|boy|girl|baby|babies|infant|toddler|teen|teenager)\b/i,
-                /\b(?:\d+[\s-]?(?:year|yr)[\s-]?old|years?\s+old)\b/i,
-                /\b(?:minor|juvenile|youth|young|little|small)\s+(?:person|people|human|individual)\b/i,
-                /\b(?:school|student|pupil|kindergarten|preschool)\b/i
+            // Only flag truly problematic combinations
+            highRiskPatterns: [
+                /\b(?:naked|nude|undressed|sexual|inappropriate|exploitation)\b.*\b(?:child|children|kid|kids|minor)\b/i,
+                /\b(?:child|children|kid|kids|minor)\b.*\b(?:naked|nude|undressed|sexual|inappropriate|exploitation)\b/i,
             ],
             
-            riskPatterns: [
-                /\b(?:model|modeling|pose|posing|photoshoot)\b/i,
-                /\b(?:cute|adorable|sweet|innocent)\s+(?:child|kid|boy|girl)\b/i,
-                /\b(?:drinking|eating|consuming)\b.*\b(?:milk|formula|bottle)\b/i
+            // Cultural enhancement indicators
+            culturalPatterns: [
+                /\b(?:african|asian|hispanic|latino|native|indigenous|traditional|cultural|ethnic)\b/i,
+                /\b(?:family|community|child|children|portrait|traditional)\b/i
             ],
             
-            // Replacement patterns for rule-based transformation
-            replacements: [
-                // Age patterns
-                { pattern: /\b\d+[\s-]?(?:year|yr)[\s-]?old\b/gi, replacement: '' },
-                { pattern: /\byears?\s+old\b/gi, replacement: '' },
-                
-                // People to objects
-                { pattern: /\b(?:child|children|kid|kids|boy|girl|baby|babies|infant|toddler)\b/gi, replacement: 'product' },
-                { pattern: /\b(?:person|people|human|individual|model)\b/gi, replacement: 'item' },
-                
-                // Actions to states
-                { pattern: /\b(?:drinking|eating|consuming)\b/gi, replacement: 'featuring' },
-                { pattern: /\b(?:holding|grasping|clutching)\b/gi, replacement: 'displaying' },
-                
-                // Contexts to artistic styles
-                { pattern: /\bphotoshoot\b/gi, replacement: 'product photography' },
-                { pattern: /\bmodeling\b/gi, replacement: 'artistic arrangement' },
-                { pattern: /\bpose\b/gi, replacement: 'composition' }
+            // Quality enhancement patterns
+            qualityEnhancers: [
+                'high quality photograph',
+                'professional photography', 
+                'natural lighting',
+                'authentic cultural representation',
+                'dignified portrayal',
+                'respectful documentation',
+                'photojournalistic style',
+                'human warmth and connection',
+                'meaningful cultural moment',
+                'genuine expression',
+                'cultural authenticity',
+                'family bonds',
+                'traditional setting',
+                'natural environment'
+            ],
+            
+            // Minimal replacement patterns - only for truly inappropriate content
+            safetyReplacements: [
+                { pattern: /\b(?:naked|nude|undressed)\b/gi, replacement: 'appropriately dressed' },
+                { pattern: /\b(?:sexual|inappropriate)\b/gi, replacement: 'appropriate' },
+                { pattern: /\b(?:exploitation|exploitative)\b/gi, replacement: 'respectful representation' }
             ]
         }
     }
