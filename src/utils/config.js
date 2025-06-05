@@ -44,14 +44,14 @@ const config = {
             // Fallback parameters for different access levels
             standardParams: {
                 sampleCount: 1,
-                safetyFilterLevel: 'block_few',
+                safetyFilterLevel: 'block_none',
                 includeRaiInfo: false
             },
             
             // Conservative parameters for restricted accounts
             restrictedParams: {
                 sampleCount: 1,
-                safetyFilterLevel: 'block_some',
+                safetyFilterLevel: 'block_none',
                 includeRaiInfo: true
             }
         },
