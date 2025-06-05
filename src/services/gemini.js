@@ -2,9 +2,9 @@ const { VertexAI } = require('@google-cloud/vertexai');
 const { GoogleAuth } = require('google-auth-library');
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 const { logger } = require('../utils/logger');
 const config = require('../utils/config');
+const PromptGuard = require('../utils/promptGuard');
 
 class GeminiService {
     constructor() {
@@ -13,32 +13,14 @@ class GeminiService {
                 throw new Error('Missing GOOGLE_APPLICATION_CREDENTIALS_JSON environment variable');
             }
 
-            this.validateAndParseCredentials();
-            this.projectId = process.env.GOOGLE_CLOUD_PROJECT_ID || this.credentials.project_id;
-            this.location = process.env.GOOGLE_CLOUD_REGION || 'us-central1';
+            this.config = config.gemini;
+            this.loadAndSanitizeCredentials();
+            this.projectId = this.config.projectId || this.credentials.project_id;
+            this.location = this.config.location;
 
             this.setupCredentialsFile();
-
-            this.auth = new GoogleAuth({
-                keyFile: this.credentialsPath,
-                scopes: ['https://www.googleapis.com/auth/cloud-platform']
-            });
-
-            this.vertexai = new VertexAI({
-                project: this.projectId,
-                location: this.location,
-                googleAuthOptions: {
-                    keyFile: this.credentialsPath,
-                    scopes: ['https://www.googleapis.com/auth/cloud-platform']
-                }
-            });
-
-            // Available image generation models in order of preference
-            this.imageModels = [
-                'imagegeneration@006',
-                'imagegeneration@005',
-                'imagegeneration@002'
-            ];
+            this.initializeVertexAI();
+            this.initializePromptGuard();
 
             logger.info('Successfully initialized Vertex AI client');
         } catch (error) {
@@ -47,14 +29,12 @@ class GeminiService {
         }
     }
 
-    validateAndParseCredentials() {
+    loadAndSanitizeCredentials() {
         try {
             const credString = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
             logger.info(`Credential string length: ${credString.length}`);
             
             this.credentials = JSON.parse(credString);
-            
-            const privateKey = this.credentials.private_key;
             
             const requiredFields = ['type', 'project_id', 'private_key_id', 'private_key', 'client_email', 'client_id', 'auth_uri', 'token_uri'];
             const missingFields = requiredFields.filter(field => !this.credentials[field]);
@@ -72,6 +52,7 @@ class GeminiService {
             }
             
             // Fix private key newlines
+            const privateKey = this.credentials.private_key;
             if (privateKey.includes('\\n') && !privateKey.includes('\n')) {
                 logger.info('Converting escaped newlines to actual newlines in private key');
                 this.credentials.private_key = privateKey.replace(/\\n/g, '\n');
@@ -119,6 +100,31 @@ class GeminiService {
         }
     }
 
+    initializeVertexAI() {
+        this.auth = new GoogleAuth({
+            keyFile: this.credentialsPath,
+            scopes: ['https://www.googleapis.com/auth/cloud-platform']
+        });
+
+        this.vertexai = new VertexAI({
+            project: this.projectId,
+            location: this.location,
+            googleAuthOptions: {
+                keyFile: this.credentialsPath,
+                scopes: ['https://www.googleapis.com/auth/cloud-platform']
+            }
+        });
+
+        // Initialize text model for prompt transformation
+        this.textModel = this.vertexai.preview.getGenerativeModel({
+            model: this.config.textModel
+        });
+    }
+
+    initializePromptGuard() {
+        this.promptGuard = new PromptGuard(this.textModel, this.config);
+    }
+
     async testAuth() {
         try {
             logger.info('Testing Google Cloud authentication...');
@@ -147,166 +153,6 @@ class GeminiService {
         }
     }
 
-    // ENHANCED: Comprehensive content policy detection
-    detectProblematicContent(prompt) {
-        const issues = [];
-        const lowerPrompt = prompt.toLowerCase();
-
-        // Age-related terms that trigger policies
-        const agePatterns = [
-            /\b(?:child|children|kid|kids|boy|girl|baby|babies|infant|toddler|teen|teenager)\b/i,
-            /\b(?:\d+[\s-]?(?:year|yr)[\s-]?old|years?\s+old)\b/i,
-            /\b(?:minor|juvenile|youth|young|little|small)\s+(?:person|people|human|individual)\b/i,
-            /\b(?:school|student|pupil|kindergarten|preschool)\b/i
-        ];
-
-        // Problematic contexts even for adults
-        const riskPatterns = [
-            /\b(?:model|modeling|pose|posing|photoshoot)\b/i,
-            /\b(?:cute|adorable|sweet|innocent)\s+(?:child|kid|boy|girl)\b/i,
-            /\b(?:drinking|eating|consuming)\b.*\b(?:milk|formula|bottle)\b/i
-        ];
-
-        for (const pattern of agePatterns) {
-            if (pattern.test(prompt)) {
-                issues.push({
-                    type: 'age_related',
-                    pattern: pattern.toString(),
-                    severity: 'high'
-                });
-            }
-        }
-
-        for (const pattern of riskPatterns) {
-            if (pattern.test(prompt)) {
-                issues.push({
-                    type: 'risky_context',
-                    pattern: pattern.toString(),
-                    severity: 'medium'
-                });
-            }
-        }
-
-        return issues;
-    }
-
-    // ENHANCED: Smart prompt transformation that addresses root issues
-    async smartPromptTransformation(originalPrompt) {
-        try {
-            const issues = this.detectProblematicContent(originalPrompt);
-            
-            if (issues.length === 0) {
-                return {
-                    original: originalPrompt,
-                    transformed: originalPrompt,
-                    method: 'no_issues_detected',
-                    issues: []
-                };
-            }
-
-            logger.info(`Detected ${issues.length} potential issues:`, issues);
-
-            // Use AI to transform the prompt while preserving intent
-            const textModel = this.vertexai.preview.getGenerativeModel({
-                model: 'gemini-2.0-flash-001'
-            });
-
-            const transformationPrompt = `
-Transform this image generation prompt to avoid content policy violations while preserving the core visual intent:
-
-Original prompt: "${originalPrompt}"
-
-Guidelines:
-1. If the prompt mentions children, minors, or specific ages - transform to focus on objects, products, or abstract concepts instead
-2. Replace human subjects with inanimate objects, art styles, or conceptual representations
-3. If it's about food/drinks, focus on the product itself, not consumption by people
-4. Maintain the essence (colors, mood, style) but remove human elements
-5. Make it artistic and abstract rather than realistic
-6. Use terms like "artistic representation," "conceptual design," "product photography," "still life"
-
-Return only the transformed prompt, no explanations or quotes.
-`;
-
-            const result = await textModel.generateContent({
-                contents: [{
-                    role: 'user',
-                    parts: [{ text: transformationPrompt }]
-                }],
-                generationConfig: {
-                    temperature: 0.3,
-                    topK: 10,
-                    topP: 0.5,
-                    maxOutputTokens: 150
-                }
-            });
-
-            const candidate = result?.response?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-
-            if (candidate) {
-                const transformedPrompt = candidate.replace(/^["']|["']$/g, '');
-                logger.info(`AI transformed prompt: ${transformedPrompt}`);
-                
-                return {
-                    original: originalPrompt,
-                    transformed: transformedPrompt,
-                    method: 'ai_transformation',
-                    issues: issues
-                };
-            } else {
-                // Fallback to rule-based transformation
-                return this.ruleBasedTransformation(originalPrompt, issues);
-            }
-
-        } catch (error) {
-            logger.error('AI transformation failed:', error.message);
-            return this.ruleBasedTransformation(originalPrompt, this.detectProblematicContent(originalPrompt));
-        }
-    }
-
-    // ENHANCED: Rule-based transformation as fallback
-    ruleBasedTransformation(originalPrompt, issues) {
-        let transformed = originalPrompt.toLowerCase();
-
-        // Remove age references and replace with product focus
-        const ageReplacements = [
-            // Age patterns
-            { pattern: /\b\d+[\s-]?(?:year|yr)[\s-]?old\b/gi, replacement: '' },
-            { pattern: /\byears?\s+old\b/gi, replacement: '' },
-            
-            // People to objects
-            { pattern: /\b(?:child|children|kid|kids|boy|girl|baby|babies|infant|toddler)\b/gi, replacement: 'product' },
-            { pattern: /\b(?:person|people|human|individual|model)\b/gi, replacement: 'item' },
-            
-            // Actions to states
-            { pattern: /\b(?:drinking|eating|consuming)\b/gi, replacement: 'featuring' },
-            { pattern: /\b(?:holding|grasping|clutching)\b/gi, replacement: 'displaying' },
-            
-            // Contexts to artistic styles
-            { pattern: /\bphotoshoot\b/gi, replacement: 'product photography' },
-            { pattern: /\bmodeling\b/gi, replacement: 'artistic arrangement' },
-            { pattern: /\bpose\b/gi, replacement: 'composition' }
-        ];
-
-        // Apply all replacements
-        for (const { pattern, replacement } of ageReplacements) {
-            transformed = transformed.replace(pattern, replacement);
-        }
-
-        // Clean up and make it more abstract
-        transformed = transformed
-            .replace(/\s+/g, ' ')
-            .trim()
-            .replace(/^/, 'artistic still life composition featuring ')
-            .replace(/milk\s*fro/, 'milk glass with frothy texture');
-
-        return {
-            original: originalPrompt,
-            transformed: transformed,
-            method: 'rule_based_transformation',
-            issues: issues
-        };
-    }
-
     async validatePrompt(prompt) {
         if (!prompt || typeof prompt !== 'string') {
             throw new Error('Prompt is required and must be a string');
@@ -316,13 +162,11 @@ Return only the transformed prompt, no explanations or quotes.
             throw new Error('Prompt must be less than 1000 characters');
         }
 
-        // Enhanced validation
-        const issues = this.detectProblematicContent(prompt);
+        const issues = this.promptGuard.detectProblematicContent(prompt);
         const highSeverityIssues = issues.filter(issue => issue.severity === 'high');
 
         if (highSeverityIssues.length > 0) {
             logger.warn('High severity content policy issues detected:', highSeverityIssues);
-            // Don't throw error here, let transformation handle it
         }
 
         return true;
@@ -334,7 +178,6 @@ Return only the transformed prompt, no explanations or quotes.
             
             await this.validatePrompt(prompt);
 
-            // Enhanced strategy with smart transformation
             const strategies = [
                 // Strategy 1: Try original prompt first
                 async () => ({ 
@@ -344,7 +187,7 @@ Return only the transformed prompt, no explanations or quotes.
                 }),
                 
                 // Strategy 2: Smart AI transformation
-                async () => await this.smartPromptTransformation(prompt),
+                async () => await this.promptGuard.smartPromptTransformation(prompt),
                 
                 // Strategy 3: Ultra-safe abstract version
                 async () => ({
@@ -365,7 +208,7 @@ Return only the transformed prompt, no explanations or quotes.
                     logger.info(`Using prompt: ${finalPrompt}`);
                     
                     // Try each model in order
-                    for (const model of this.imageModels) {
+                    for (const model of this.config.imageModels) {
                         try {
                             logger.info(`Attempting with model: ${model}`);
                             const result = await this.generateWithModel(finalPrompt, model, options);
@@ -387,10 +230,7 @@ Return only the transformed prompt, no explanations or quotes.
                             lastError = modelError;
                             
                             // If it's a content policy error, try next strategy immediately
-                            if (modelError.message.includes('content policy') || 
-                                modelError.message.includes('safety') ||
-                                modelError.message.includes('blocked') ||
-                                modelError.message.includes('58061214')) {
+                            if (this.isContentPolicyError(modelError.message)) {
                                 break; // Break model loop, try next strategy
                             }
                         }
@@ -402,7 +242,7 @@ Return only the transformed prompt, no explanations or quotes.
             }
 
             // Enhanced error message based on detected issues
-            const issues = this.detectProblematicContent(prompt);
+            const issues = this.promptGuard.detectProblematicContent(prompt);
             const hasAgeIssues = issues.some(issue => issue.type === 'age_related');
             
             if (hasAgeIssues) {
@@ -414,7 +254,7 @@ Return only the transformed prompt, no explanations or quotes.
         } catch (error) {
             logger.error(`Error generating image: ${error.message}`);
             
-            if (error.message && error.message.includes('quota')) {
+            if (this.isQuotaError(error.message)) {
                 throw new Error('Rate limit exceeded. Please try again later.');
             }
             
@@ -422,7 +262,6 @@ Return only the transformed prompt, no explanations or quotes.
         }
     }
 
-    // IMPROVED: Better response handling
     async generateWithModel(prompt, modelName, options = {}) {
         try {
             await this.testAuth();
@@ -463,13 +302,8 @@ Return only the transformed prompt, no explanations or quotes.
             if (!response.ok) {
                 logger.error(`${modelName} error response:`, responseText);
                 
-                if (response.status === 400) {
-                    if (responseText.includes('content policy') || 
-                        responseText.includes('safety') || 
-                        responseText.includes('blocked') ||
-                        responseText.includes('58061214')) {
-                        throw new Error('Content policy violation');
-                    }
+                if (response.status === 400 && this.isContentPolicyError(responseText)) {
+                    throw new Error('Content policy violation');
                 }
                 
                 throw new Error(`${modelName} API error: ${response.status} - ${responseText}`);
@@ -482,7 +316,6 @@ Return only the transformed prompt, no explanations or quotes.
                 throw new Error('Invalid response format from image generation API');
             }
             
-            // Enhanced response validation
             if (result.predictions && result.predictions[0]) {
                 const prediction = result.predictions[0];
                 
@@ -494,10 +327,8 @@ Return only the transformed prompt, no explanations or quotes.
                 }
             }
 
-            // Log the actual response structure for debugging
             logger.error(`Unexpected response structure from ${modelName}:`, JSON.stringify(result, null, 2));
 
-            // Check for empty predictions (content policy)
             if (result.predictions && result.predictions.length === 0) {
                 throw new Error('Content policy violation - empty response');
             }
@@ -519,6 +350,18 @@ Return only the transformed prompt, no explanations or quotes.
             logger.error('Failed to get access token:', error.message);
             throw error;
         }
+    }
+
+    isContentPolicyError(errorMessage) {
+        return this.config.apiErrorStrings.contentPolicy.some(errorStr => 
+            errorMessage.toLowerCase().includes(errorStr.toLowerCase())
+        );
+    }
+
+    isQuotaError(errorMessage) {
+        return this.config.apiErrorStrings.quota.some(errorStr => 
+            errorMessage.toLowerCase().includes(errorStr.toLowerCase())
+        );
     }
 
     cleanup() {
